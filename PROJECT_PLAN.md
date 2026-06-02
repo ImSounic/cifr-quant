@@ -107,6 +107,8 @@ CIFR-QUANT is a multi-market algorithmic trading system built on top of **Kronos
 | Data volume | 2+ years of 1-hour data (~6.2k candles/year) |
 | Finetuned checkpoint | `checkpoints/ckpt-eur/` |
 | Rationale | Most liquid instrument on earth, negligible spreads (~0.1 pips). Session-based trading (London/NY/Tokyo) captured by Kronos temporal embeddings. 21 days context captures weekly cycles. |
+| **Volume note** | Forex spot has no centralized volume. Use `volume=0, amount=0` — Kronos handles this (fills with zeros). Tick volume from brokers is a poor proxy and should NOT be used. |
+| **Gap handling** | Forex closes on weekends. 512 hourly candles = ~21 *trading* days (~30 calendar days). Weekend gaps must be handled: either skip gaps (let temporal embeddings handle it) or insert NaN rows and let Kronos truncate. |
 
 ### Experiment 3: Commodities — XAU/USD (Gold)
 
@@ -116,10 +118,11 @@ CIFR-QUANT is a multi-market algorithmic trading system built on top of **Kronos
 | Timeframe | 4-hour candles |
 | Context window | 512 candles = ~85 trading days (~3 months) |
 | Prediction horizon | 6–42 candles (1 day – 1 week) |
-| Data source | MetaTrader 5 or TradingView API |
-| Data volume | 2+ years of 4-hour data (~1.5k candles/year) |
+| Data source | `yfinance` (GC=F gold futures) or TwelveData API. **NOT MetaTrader5** (Windows-only, won't run on macOS) |
+| Data volume | **5+ years** of 4-hour data (~1.5k candles/year = ~7.5k total). 2 years is too few for finetuning a 102M model on a single instrument. |
 | Finetuned checkpoint | `checkpoints/ckpt-xau/` |
 | Rationale | Strong trending behavior driven by real rates, central bank buying, risk-off flows. 3-month context captures macro trend structure. Futures exchanges (COMEX) were in Kronos training data. |
+| **Volume note** | Gold spot volume is unreliable from most free sources. Use `volume=0, amount=0` — Kronos handles missing volume gracefully (fills with zeros). Alternatively, use gold futures (GC=F) which have real volume. |
 
 ---
 
@@ -150,6 +153,14 @@ CIFR-QUANT is a multi-market algorithmic trading system built on top of **Kronos
 
 ## Finetuning Pipeline
 
+### Use `finetune_csv/` (NOT Qlib pipeline)
+
+> **IMPORTANT**: Kronos provides TWO finetuning paths:
+> 1. `finetune/` — designed for Chinese A-share data via Microsoft Qlib. **Not suitable for us.**
+> 2. `finetune_csv/` — designed for arbitrary CSV data. **This is what we use.**
+>
+> The CSV pipeline accepts standard OHLCV CSVs and does not require Qlib installation.
+
 ### Two-Stage Finetuning (per market)
 
 **Stage 1 — Finetune Tokenizer (~2 hours per checkpoint)**
@@ -157,7 +168,7 @@ CIFR-QUANT is a multi-market algorithmic trading system built on top of **Kronos
 Adapts the BSQ codebook to the specific market's statistical distribution. A tokenizer trained on 45 exchanges has generalized representations; finetuning aligns high-frequency codebook entries with the target instrument's typical candle patterns.
 
 ```bash
-torchrun --standalone --nproc_per_node=NUM_GPUS finetune/train_tokenizer.py
+torchrun --standalone --nproc_per_node=NUM_GPUS finetune_csv/train_tokenizer.py
 ```
 
 **Stage 2 — Finetune Predictor (~4 hours per checkpoint)**
@@ -165,23 +176,39 @@ torchrun --standalone --nproc_per_node=NUM_GPUS finetune/train_tokenizer.py
 Adapts the transformer weights to predict the specific instrument's next-candle sequence. The model learns instrument-specific temporal patterns, volatility regimes, and session effects.
 
 ```bash
-torchrun --standalone --nproc_per_node=NUM_GPUS finetune/train_predictor.py
+torchrun --standalone --nproc_per_node=NUM_GPUS finetune_csv/train_predictor.py
 ```
+
+### Data Volume Considerations
+
+| Market | Timeframe | Candles/year | 2 years | 5 years | Sufficient for finetuning? |
+|--------|-----------|-------------|---------|---------|---------------------------|
+| BTC/USDT | 15-min | ~70,000 | ~140k | ~350k | 2 years is plenty |
+| EUR/USD | 1-hour | ~6,200 | ~12.4k | ~31k | 2 years is marginal, 5 years preferred |
+| XAU/USD | 4-hour | ~1,500 | ~3k | ~7.5k | **2 years is too few.** Use 5+ years, or augment with XAG/USD (silver) and GC=F (gold futures) |
+
+For gold, consider finetuning on a basket of commodities (gold, silver, crude oil) to increase data volume, then evaluate on gold specifically.
 
 ### Data Splits (per market)
 
 ```
-|<──────── Train ────────>|<── Val ──>|<── Test ──>|
-|     Everything before   | Months    | Last 3     |
-|     last 6 months       | -6 to -3  | months     |
-|                         |           | (UNTOUCHED |
-|                         |           | until final|
-|                         |           | evaluation)|
+|<──────── Train ────────>|<─ Cal ─>|<── Val ──>|<── Test ──>|
+|     Everything before   | Months  | Months    | Last 3     |
+|     last 9 months       | -9 to -6| -6 to -3  | months     |
+|                         | (CQR    | (early    | (UNTOUCHED |
+|                         | calib.) | stopping) | until final|
+|                         |         |           | evaluation)|
 ```
 
-- **Train**: All data except last 6 months — used for tokenizer + predictor finetuning
+- **Train**: All data except last 9 months — used for tokenizer + predictor finetuning
+- **Calibration**: Months -9 to -6 — used ONLY for CQR conformity scores (after finetuning is frozen)
 - **Validation**: Months -6 to -3 — used for early stopping, hyperparameter selection
 - **Test**: Last 3 months — touched exactly ONCE at the end for final evaluation
+
+> **Why 4-way split?** Using the same validation data for both finetuning early stopping
+> and CQR calibration introduces data leakage — the model was partially fit to validation
+> data via early stopping, so CQR conformity scores computed on it would be optimistic.
+> A separate calibration set keeps CQR coverage guarantees valid.
 
 ### Hardware Requirements
 
@@ -203,19 +230,30 @@ torchrun --standalone --nproc_per_node=NUM_GPUS finetune/train_predictor.py
 
 **Step 1 — Generate N forecast paths**
 
+> **CRITICAL IMPLEMENTATION NOTE**: Kronos's `predict()` with `sample_count=N` generates N paths
+> and **averages them into a single DataFrame**. It does NOT return individual paths. To get
+> 30 separate trajectories for quantile analysis, we must call `predict()` 30 times with
+> `sample_count=1` and collect each result independently.
+
 ```python
-pred_df = predictor.predict(
-    df=x_df,
-    x_timestamp=x_timestamp,
-    y_timestamp=y_timestamp,
-    pred_len=pred_len,
-    T=1.0,
-    top_p=0.9,
-    sample_count=30  # Generate 30 distinct future trajectories
-)
+# CORRECT: Call predict() N times to get N individual paths
+paths = []
+for i in range(30):
+    path_df = predictor.predict(
+        df=x_df,
+        x_timestamp=x_timestamp,
+        y_timestamp=y_timestamp,
+        pred_len=pred_len,
+        T=1.0,          # Temperature controls randomness
+        top_p=0.9,      # Nucleus sampling
+        sample_count=1   # Single path per call
+    )
+    paths.append(path_df)
+
+# paths is now a list of 30 DataFrames, each a distinct future trajectory
 ```
 
-Each call with `sample_count=30` produces 30 sampled price paths via temperature-controlled autoregressive generation. Different random seeds produce different plausible futures.
+Each call with `sample_count=1` and `T > 0` produces a stochastically sampled path. Temperature-controlled autoregressive generation ensures each path is different.
 
 **Step 2 — Extract empirical quantiles**
 
@@ -364,7 +402,7 @@ The model is re-predicted (not re-trained) at each step using the rolling contex
 
 ### Phase 2: Kronos Integration (Week 2)
 
-- [ ] Clone Kronos repo as submodule or install as dependency
+- [ ] Install Kronos via `pip install kronos-model-arch` or clone repo and add `model/` to Python path
 - [ ] Load pre-trained Kronos-base and Tokenizer-base from HuggingFace
 - [ ] Build `KronosPredictor` wrapper for each market
 - [ ] Verify zero-shot inference works on all three instruments
@@ -442,7 +480,7 @@ cifr-quant/
 │   │   ├── __init__.py
 │   │   ├── binance_client.py  # BTC data fetcher
 │   │   ├── forex_client.py    # EUR/USD data fetcher
-│   │   ├── gold_client.py     # XAU/USD data fetcher
+│   │   ├── gold_client.py     # XAU/USD data fetcher (yfinance GC=F or TwelveData)
 │   │   ├── preprocessor.py    # Cleaning, validation, Z-score clipping
 │   │   └── splitter.py        # Train/val/test temporal splits
 │   │
@@ -476,11 +514,12 @@ cifr-quant/
 │       ├── metrics.py         # Sharpe, drawdown, Calmar, etc.
 │       └── report.py          # Generate performance reports
 │
-├── finetune/                  # Finetuning scripts (run on uni GPUs)
-│   ├── config.py              # Base finetuning configuration
-│   ├── train_tokenizer.py     # Tokenizer finetuning script
-│   ├── train_predictor.py     # Predictor finetuning script
-│   └── prepare_data.py        # Data preparation for finetuning
+├── finetune/                  # Finetuning scripts (run on uni GPUs, uses Kronos finetune_csv/ pipeline)
+│   ├── config_btc.py          # BTC finetuning config
+│   ├── config_eur.py          # EUR finetuning config
+│   ├── config_xau.py          # XAU finetuning config
+│   ├── prepare_data.py        # Convert our data → Kronos CSV format
+│   └── run_finetune.sh        # Shell script to run all 3 finetuning jobs
 │
 ├── checkpoints/               # Finetuned model weights (gitignored)
 │   ├── ckpt-btc/
@@ -572,10 +611,11 @@ numpy
 # (cloned from https://github.com/shiyu-coder/Kronos)
 
 # Data
-ccxt              # Crypto exchange API (Binance)
-oandapyV20        # Forex API (OANDA)
-MetaTrader5       # Gold data (MT5)
-yfinance          # Backup data source
+ccxt              # Crypto exchange API (Binance) — also supports gold CFDs
+yfinance          # Gold futures (GC=F), forex backup, equities
+twelvedata        # Forex & gold OHLCV (free tier: 800 req/day)
+# NOTE: MetaTrader5 is Windows-only, do NOT use on macOS
+# NOTE: oandapyV20 requires OANDA account + API key
 
 # Backtesting
 vectorbt          # Vectorized backtesting
@@ -598,6 +638,50 @@ wandb             # or comet_ml
 
 ---
 
+## Environment Variables
+
+```bash
+# .env (gitignored, never committed)
+BINANCE_API_KEY=           # Optional — public endpoints work without auth for historical data
+BINANCE_SECRET=            # Optional
+TWELVEDATA_API_KEY=        # Required for forex/gold data (free tier: 800 req/day)
+ANTHROPIC_API_KEY=         # Required for LLM strategy layer (Claude)
+WANDB_API_KEY=             # Optional — experiment tracking
+```
+
+## .gitignore Must Include
+
+```
+# Data (large, reproducible from scripts)
+data/
+*.csv
+*.pkl
+
+# Model checkpoints (large binary files)
+checkpoints/
+
+# Results
+results/
+
+# Secrets
+.env
+*.key
+
+# Python
+__pycache__/
+*.pyc
+.venv/
+*.egg-info/
+
+# Jupyter
+.ipynb_checkpoints/
+
+# OS
+.DS_Store
+```
+
+---
+
 ## References
 
 - Shi et al. (2025). "Kronos: A Foundation Model for the Language of Financial Markets." arXiv:2508.02739. AAAI 2026.
@@ -608,4 +692,26 @@ wandb             # or comet_ml
 
 ---
 
-*Last updated: June 2, 2026*
+---
+
+## Issues Found During Plan Review (Fixed Above)
+
+For posterity, these are the 7 issues caught during review before implementation began:
+
+1. **`sample_count` bug**: `predict(sample_count=30)` returns an averaged single DataFrame, NOT 30 individual paths. Must call `predict(sample_count=1)` in a loop of 30 to get individual trajectories for quantile analysis. **Fixed in Quantile Risk section.**
+
+2. **Wrong finetuning pipeline**: Plan originally referenced `finetune/` (Qlib-based, Chinese A-shares only). Our data is CSV-based, so we must use `finetune_csv/`. **Fixed in Finetuning Pipeline section.**
+
+3. **MetaTrader5 is Windows-only**: The `MetaTrader5` Python package does not work on macOS. Replaced with `yfinance` (GC=F gold futures) and TwelveData API. **Fixed in Experiment 3 and Dependencies.**
+
+4. **Gold data volume too small**: 4-hour candles × 2 years = ~3k candles. Insufficient for finetuning 102M params on a single instrument. Increased to 5+ years and suggested multi-commodity augmentation. **Fixed in Experiment 3 and Data Volume table.**
+
+5. **CQR calibration leakage**: Original 3-way split (train/val/test) used validation set for both finetuning early stopping AND CQR calibration — double-dipping introduces leakage. Changed to 4-way split (train/calibration/validation/test). **Fixed in Data Splits section.**
+
+6. **Missing volume/amount for forex and gold**: Forex spot has no real volume data; gold spot volume is unreliable. Kronos fills missing volume/amount with zeros, but the plan didn't acknowledge this. **Fixed with explicit notes in Experiments 2 and 3.**
+
+7. **Missing `.gitignore` and `.env` specifications**: Plan said "gitignored" and "use environment variables" without specifying contents. **Fixed with explicit sections added.**
+
+---
+
+*Last updated: June 2, 2026 (rev 2 — post-review fixes applied)*

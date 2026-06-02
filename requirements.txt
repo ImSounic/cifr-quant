@@ -1,0 +1,33 @@
+# Core
+torch>=2.0
+transformers>=4.30
+pandas>=2.0
+numpy>=1.24
+einops>=0.8.0
+huggingface_hub>=0.33.0
+
+# Data collection
+ccxt>=4.0
+yfinance>=0.2.30
+twelvedata>=1.2
+
+# Backtesting
+vectorbt>=0.26
+
+# Risk / Statistics
+mapie>=0.9
+scipy>=1.11
+
+# LLM
+anthropic>=0.30
+
+# Visualization
+matplotlib>=3.7
+plotly>=5.15
+
+# Experiment tracking
+wandb>=0.16
+
+# Utilities
+python-dotenv>=1.0
+tqdm>=4.65

@@ -1,0 +1,52 @@
+# XAU/USD (Gold) 4-hour finetuning config for Kronos
+
+data:
+  data_path: "../data/processed/xau/tokenizer_train.csv"
+  lookback_window: 512
+  predict_window: 6         # 6 candles = 1 day at 4-hour
+  max_context: 512
+  clip: 5.0
+  train_ratio: 0.9
+  val_ratio: 0.1
+  test_ratio: 0.0
+
+training:
+  tokenizer_epochs: 50       # Most epochs: smallest dataset
+  basemodel_epochs: 20
+  batch_size: 8              # Small batch for small dataset
+  log_interval: 20
+  num_workers: 4
+  seed: 42
+
+  tokenizer_learning_rate: 0.00005   # Very conservative
+  predictor_learning_rate: 0.000002
+
+  adam_beta1: 0.9
+  adam_beta2: 0.95
+  adam_weight_decay: 0.1
+  accumulation_steps: 4      # Effective batch = 32
+
+model_paths:
+  pretrained_tokenizer: "NeoQuasar/Kronos-Tokenizer-base"
+  pretrained_predictor: "NeoQuasar/Kronos-base"
+
+  exp_name: "cifr-xau"
+  base_path: "../checkpoints"
+
+  base_save_path: ""
+  finetuned_tokenizer: ""
+
+  tokenizer_save_name: "tokenizer"
+  basemodel_save_name: "predictor"
+
+experiment:
+  name: "cifr_xau_finetune"
+  description: "XAU/USD 4-hour finetuning for cifr-quant"
+  use_comet: false
+  train_tokenizer: true
+  train_basemodel: true
+  skip_existing: false
+
+device:
+  use_cuda: true
+  device_id: 0

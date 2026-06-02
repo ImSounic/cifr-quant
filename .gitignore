@@ -216,3 +216,18 @@ __marimo__/
 
 # Streamlit
 .streamlit/secrets.toml
+
+# ═══ CIFR-QUANT SPECIFIC ═══
+
+# Market data (large, reproducible from scripts)
+data/
+
+# Model checkpoints (large binary files)
+checkpoints/
+
+# Evaluation results
+results/
+
+# OS
+.DS_Store
+Kronos/
