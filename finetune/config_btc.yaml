@@ -13,9 +13,9 @@ data:
 training:
   tokenizer_epochs: 20
   basemodel_epochs: 10
-  batch_size: 32
+  batch_size: 64              # L40S 48GB — can handle large batches
   log_interval: 50
-  num_workers: 4
+  num_workers: 8              # HPC has more CPU cores
   seed: 42
 
   tokenizer_learning_rate: 0.0002

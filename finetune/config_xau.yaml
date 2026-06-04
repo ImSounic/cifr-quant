@@ -13,9 +13,9 @@ data:
 training:
   tokenizer_epochs: 50       # Most epochs: smallest dataset
   basemodel_epochs: 20
-  batch_size: 8              # Small batch for small dataset
+  batch_size: 32             # L40S — real batch size, no accumulation tricks
   log_interval: 20
-  num_workers: 4
+  num_workers: 8
   seed: 42
 
   tokenizer_learning_rate: 0.00005   # Very conservative
@@ -24,7 +24,7 @@ training:
   adam_beta1: 0.9
   adam_beta2: 0.95
   adam_weight_decay: 0.1
-  accumulation_steps: 4      # Effective batch = 32
+  accumulation_steps: 1      # No accumulation needed with L40S
 
 model_paths:
   pretrained_tokenizer: "NeoQuasar/Kronos-Tokenizer-base"
