@@ -220,7 +220,7 @@ __marimo__/
 # ═══ CIFR-QUANT SPECIFIC ═══
 
 # Market data (large, reproducible from scripts)
-data/
+/data/
 
 # Model checkpoints (large binary files)
 checkpoints/
