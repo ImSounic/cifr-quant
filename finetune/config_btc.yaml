@@ -1,7 +1,7 @@
 # BTC/USDT 15-min finetuning config for Kronos
 
 data:
-  data_path: "../data/processed/btc/tokenizer_train.csv"
+  data_path: "/home/s3702111/cifr-quant/data/processed/btc/tokenizer_train.csv"
   lookback_window: 512
   predict_window: 48        # 48 candles = 12 hours at 15-min
   max_context: 512
@@ -13,7 +13,7 @@ data:
 training:
   tokenizer_epochs: 20
   basemodel_epochs: 10
-  batch_size: 64              # L40S 48GB — can handle large batches
+  batch_size: 128             # L40S 48GB — maximize GPU utilization
   log_interval: 50
   num_workers: 8              # HPC has more CPU cores
   seed: 42
@@ -45,7 +45,7 @@ experiment:
   use_comet: false
   train_tokenizer: true
   train_basemodel: true
-  skip_existing: false
+  skip_existing: true
 
 device:
   use_cuda: true
