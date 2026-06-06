@@ -1,7 +1,7 @@
 #!/bin/bash
 #SBATCH --job-name=cifr-eur-v2
 #SBATCH --partition=main-gpu
-#SBATCH --gres=gpu:lovelace:1
+#SBATCH --gres=gpu:ampere:1
 #SBATCH --time=08:00:00
 #SBATCH --cpus-per-task=16
 #SBATCH --mem=64G

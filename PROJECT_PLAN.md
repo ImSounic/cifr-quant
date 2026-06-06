@@ -214,13 +214,49 @@ For gold, consider finetuning on a basket of commodities (gold, silver, crude oi
 
 | Task | GPU | VRAM | Time |
 |------|-----|------|------|
-| Finetune tokenizer (per market) | A10 or A100 | ~8 GB | ~2 hours |
-| Finetune predictor (per market) | A10 or A100 | ~12 GB | ~4 hours |
+| Finetune tokenizer (per market) | L40S (Lovelace) | ~8 GB | ~1-2.5 hours |
+| Finetune predictor (per market) | L40S (Lovelace) | ~12 GB | ~2-8 hours |
 | Inference (per market) | Mac Mini 16GB / any GPU | ~4 GB | seconds |
-| **Total for 3 markets** | | | **~18–24 hours** |
+| **Total for 3 markets** | | | **~12–18 hours** |
 
 **Development**: Mac Mini 16GB (data pipeline, inference, backtesting)
-**Training**: University JupyterLab with A10/A100 GPUs
+**Training**: UTwente HPC SLURM cluster — L40S (Lovelace) GPUs preferred over A40 (Ampere), ~1.5-2x faster
+
+### Ensemble Architecture
+
+Based on research into how top quant firms (Renaissance, Two Sigma) operate:
+
+```
+┌────────────────────────────────────────────────────┐
+│                 ENSEMBLE PREDICTOR                  │
+│                                                     │
+│  ┌──────────┐  ┌──────────┐  ┌──────────┐         │
+│  │ Zero-Shot│  │Finetuned │  │Finetuned │  ...     │
+│  │  Kronos  │  │  v1      │  │  v2      │         │
+│  │  (base)  │  │(seed=42) │  │(seed=137)│         │
+│  └────┬─────┘  └────┬─────┘  └────┬─────┘         │
+│       │              │              │               │
+│       └──────────────┼──────────────┘               │
+│                      │                              │
+│              Weighted Average                       │
+│         (equal or inverse val loss)                 │
+│                      │                              │
+│              ┌───────▼────────┐                     │
+│              │ Monte Carlo    │                     │
+│              │ Path Sampling  │                     │
+│              │ (50 paths)     │                     │
+│              └───────┬────────┘                     │
+│                      │                              │
+│              ┌───────▼────────┐                     │
+│              │ CQR-Calibrated │                     │
+│              │ Quantile Bands │                     │
+│              └───────┬────────┘                     │
+│                      │                              │
+│         Direction + Confidence + SL/TP              │
+└────────────────────────────────────────────────────┘
+```
+
+**Key insight (Grinold's Law)**: IR = IC × √Breadth. Two models with IC=0.05 and low correlation produce combined IC >> 0.05. Diversity (different seeds, zero-shot vs finetuned) is more valuable than individual model accuracy.
 
 ---
 
@@ -389,62 +425,73 @@ The model is re-predicted (not re-trained) at each step using the rolling contex
 
 ## Implementation Phases
 
-### Phase 1: Data Pipeline (Week 1)
+### Phase 1: Data Pipeline ✅ COMPLETE
 
-- [ ] Set up data collection scripts for all three markets
-  - [ ] Binance API client for BTC/USDT 15-min OHLCV
-  - [ ] OANDA/FXCM API client for EUR/USD 1-hour OHLCV
-  - [ ] MetaTrader5/TradingView client for XAU/USD 4-hour OHLCV
-- [ ] Data cleaning and validation (Z-score clipping, gap handling, session filtering)
-- [ ] Data splitting logic (train/val/test with temporal boundaries)
-- [ ] Data format conversion to Kronos-compatible DataFrames
-- [ ] Storage: raw data in `data/raw/`, processed in `data/processed/`
+- [x] Binance API client for BTC/USDT 15-min OHLCV (~97k candles)
+- [x] TwelveData API client for EUR/USD 1-hour OHLCV (~23k candles)
+- [x] TwelveData API client for XAU/USD 4-hour OHLCV (~9.5k candles)
+- [x] Data cleaning, validation, Z-score clipping
+- [x] Data splitting: tokenizer_train.csv, validation.csv, test.csv per market
+- [x] Storage in `data/processed/{btc,eur,xau}/`
 
-### Phase 2: Kronos Integration (Week 2)
+### Phase 2: Kronos Integration ✅ COMPLETE
 
-- [ ] Install Kronos via `pip install kronos-model-arch` or clone repo and add `model/` to Python path
-- [ ] Load pre-trained Kronos-base and Tokenizer-base from HuggingFace
-- [ ] Build `KronosPredictor` wrapper for each market
-- [ ] Verify zero-shot inference works on all three instruments
-- [ ] Benchmark zero-shot RankIC/IC as baseline
+- [x] Kronos cloned to `Kronos/` subdir, added to Python path
+- [x] Pre-trained Kronos-base + Tokenizer-base loaded from HuggingFace (`NeoQuasar/Kronos-base`)
+- [x] Model/tokenizer cached on HPC head node (compute nodes offline)
+- [x] Zero-shot inference verified on all 3 markets
+- [x] Zero-shot baseline: BTC IC=-0.34, DA=60%; EUR IC=-0.26, DA=40%
 
-### Phase 3: Finetuning (Week 3)
+### Phase 3: Finetuning 🔄 IN PROGRESS
 
-- [ ] Prepare finetuning configs for each market (`configs/btc.py`, `configs/eur.py`, `configs/xau.py`)
-- [ ] Upload data + scripts to university JupyterLab
-- [ ] Finetune tokenizer for each market (3 runs × ~2h)
-- [ ] Finetune predictor for each market (3 runs × ~4h)
-- [ ] Download finetuned checkpoints to local machine
-- [ ] Compare finetuned vs zero-shot metrics on validation set
+- [x] YAML configs for all markets (`finetune/config_{btc,eur,xau}.yaml`)
+- [x] SLURM scripts targeting L40S GPUs (`slurm/finetune_*.sh`)
+- [x] EUR v1 complete (val_loss=1.6098, 1h12m) — improved RMSE/MAE vs zero-shot
+- [x] XAU v1 complete (val_loss=0.9054, 1h39m) — **OVERFITTED** (zero-shot better)
+- [x] BTC tokenizer complete (val_loss=0.0027, 2.6h)
+- [ ] BTC predictor training (job 510044, L40S, ~6-8h)
+- [ ] EUR v2 training (job 510045, seed=137 for ensemble diversity)
+- [ ] XAU v2 training (job 510046, anti-overfitting: 15+5 epochs, lower LR)
+- [ ] Compare all checkpoints: ZS vs FT_v1 vs FT_v2
 
-### Phase 4: Quantile Risk Management (Week 4)
+### Phase 3.5: Ensemble Evaluation ⏳ NEXT
 
-- [ ] Implement multi-path sampling (sample_count=30)
-- [ ] Build empirical quantile extraction (SL/TP levels)
-- [ ] Implement CQR calibration on validation data
-- [ ] Validate coverage guarantees on held-out calibration set
-- [ ] Build adaptive position sizing based on interval width
+- [ ] Run `eval_ensemble.py` with 50+ windows and bootstrap CIs
+- [ ] Benchmark: zero_shot, finetuned_v1, finetuned_v2, ensemble_eq, ensemble_full
+- [ ] Measure signal correlation between models (key for Grinold's Law)
+- [ ] Select best ensemble weights per market
 
-### Phase 5: Backtest Engine (Week 5)
+### Phase 4: Quantile Risk Management ⏳ PENDING
 
-- [ ] Build walk-forward backtest framework
-- [ ] Implement realistic cost models per market
-- [ ] Build multi-strategy executor (trend/mean-revert/breakout/vol-target)
-- [ ] Implement evaluation metrics suite (Sharpe, drawdown, Calmar, etc.)
-- [ ] Run baseline backtests with simple strategies
+- [x] Code written: `src/risk/cqr.py`, `src/risk/quantile.py`, `src/risk/position_sizer.py`
+- [x] `EnsemblePredictor.predict_with_quantiles()` generates probabilistic forecasts
+- [ ] Run CQR calibration on calibration split for each market
+- [ ] Validate coverage guarantees (90% target)
+- [ ] Tune position sizing: wide intervals → small positions
 
-### Phase 6: LLM Strategy Layer (Week 6)
+### Phase 5: Backtest Engine ⏳ PENDING
 
-- [ ] Design context pack format (forecasts + regime + market state)
-- [ ] Build LLM strategy generation pipeline
-- [ ] Implement strategy code execution sandbox
+- [x] Code written: `src/backtest/engine.py`, `src/backtest/costs.py`, `src/backtest/metrics.py`
+- [ ] Walk-forward backtest with realistic costs (BTC ~0.07%, EUR ~1 pip, XAU ~$0.40)
+- [ ] Multi-strategy comparison
+- [ ] Sharpe, drawdown, Calmar evaluation
+
+### Phase 5.5: Regime Detection ❌ NOT STARTED
+
+- [ ] Implement HMM or volatility-based regime classifier
+- [ ] Adjust signal weighting per regime (trending vs mean-reverting vs volatile)
+- [ ] Adjust position sizing per regime
+- [ ] This is the single highest-impact addition per quant research
+
+### Phase 6: LLM Strategy Layer ⏳ PENDING
+
+- [x] Code written: `src/strategy/llm_generator.py`, `src/strategy/executor.py`, `src/strategy/context_builder.py`
 - [ ] Test strategy generation → backtest → evaluation loop
 - [ ] Add guardrails (iteration limits, parameter budgets)
 
-### Phase 7: Integration & Evaluation (Week 7–8)
+### Phase 7: Integration & Final Evaluation ⏳ PENDING
 
-- [ ] End-to-end pipeline: data → forecast → SL/TP → strategy → backtest
-- [ ] Run full evaluation on all three markets
+- [ ] End-to-end pipeline: data → ensemble forecast → CQR → regime → strategy → backtest
 - [ ] Final test set evaluation (last 3 months, ONE TIME ONLY)
 - [ ] Cross-market performance comparison
 - [ ] Document results and findings
@@ -714,4 +761,25 @@ For posterity, these are the 7 issues caught during review before implementation
 
 ---
 
-*Last updated: June 2, 2026 (rev 2 — post-review fixes applied)*
+---
+
+## Research Findings (June 6, 2026)
+
+### Quant Firm & ML Trading Research
+
+1. **No public profitable Kronos trading results** — Kronos paper acknowledges backtesting is "simplified example, not production-ready". AER and IR metrics reported, but no live P&L.
+2. **Top firms use ensemble of weak signals** — Renaissance Medallion (~35% annualized), Two Sigma, Citadel all combine many uncorrelated signals rather than relying on one model.
+3. **What kills ML trading**: overfitting to historical patterns, ignoring regime changes, not accounting for execution costs (slippage, fees).
+4. **What works**: mean-reversion + momentum with regime detection, ensemble methods, robust position sizing (Kelly/fractional Kelly), walk-forward validation.
+5. **Realistic targets**: Sharpe 1.0-1.5 excellent for retail quant, 2.0+ exceptional. Dir. accuracy of 53-55% with proper sizing can be very profitable.
+
+### Applied to CIFR-QUANT
+
+- Ensemble architecture (ZS + multi-seed FT) directly implements Grinold's Law
+- CQR calibration provides distribution-free uncertainty quantification
+- Regime detection is the single highest-impact feature not yet implemented
+- Walk-forward backtest with realistic costs is non-negotiable before live trading
+
+---
+
+*Last updated: June 6, 2026 (rev 3 — ensemble architecture, research findings, phase status updates)*

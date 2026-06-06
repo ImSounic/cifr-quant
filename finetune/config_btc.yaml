@@ -13,7 +13,7 @@ data:
 training:
   tokenizer_epochs: 20
   basemodel_epochs: 10
-  batch_size: 128             # L40S 48GB — maximize GPU utilization
+  batch_size: 64              # A40 46GB
   log_interval: 50
   num_workers: 8              # HPC has more CPU cores
   seed: 42
