@@ -1,0 +1,53 @@
+# XAU/USD v2 — reduced overfitting
+# Changes from v1: fewer epochs, lower LR, higher weight decay
+
+data:
+  data_path: "/home/s3702111/cifr-quant/data/processed/xau/tokenizer_train.csv"
+  lookback_window: 512
+  predict_window: 6
+  max_context: 512
+  clip: 5.0
+  train_ratio: 0.85          # More validation data for better early-stop signal
+  val_ratio: 0.15
+  test_ratio: 0.0
+
+training:
+  tokenizer_epochs: 15        # v1 had 50 — way too many for 9.5k candles
+  basemodel_epochs: 5         # v1 had 20 — clear overfitting
+  batch_size: 32
+  log_interval: 20
+  num_workers: 8
+  seed: 42
+
+  tokenizer_learning_rate: 0.00003    # Lower than v1 (0.00005)
+  predictor_learning_rate: 0.000001   # Lower than v1 (0.000002)
+
+  adam_beta1: 0.9
+  adam_beta2: 0.95
+  adam_weight_decay: 0.15             # Higher than v1 (0.1) — more regularization
+  accumulation_steps: 1
+
+model_paths:
+  pretrained_tokenizer: "NeoQuasar/Kronos-Tokenizer-base"
+  pretrained_predictor: "NeoQuasar/Kronos-base"
+
+  exp_name: "cifr-xau-v2"
+  base_path: "../checkpoints"
+
+  base_save_path: ""
+  finetuned_tokenizer: ""
+
+  tokenizer_save_name: "tokenizer"
+  basemodel_save_name: "predictor"
+
+experiment:
+  name: "cifr_xau_v2"
+  description: "XAU/USD v2 — reduced overfitting"
+  use_comet: false
+  train_tokenizer: true
+  train_basemodel: true
+  skip_existing: false
+
+device:
+  use_cuda: true
+  device_id: 0
