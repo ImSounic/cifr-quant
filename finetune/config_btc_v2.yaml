@@ -1,0 +1,53 @@
+# BTC/USDT v2 finetuning — different seed for ensemble diversity
+# Same hyperparams as v1, seed=137 (v1 was 42)
+
+data:
+  data_path: "/home/s3702111/cifr-quant/data/processed/btc/tokenizer_train.csv"
+  lookback_window: 512
+  predict_window: 48        # 48 candles = 12 hours at 15-min
+  max_context: 512
+  clip: 5.0
+  train_ratio: 0.9
+  val_ratio: 0.1
+  test_ratio: 0.0
+
+training:
+  tokenizer_epochs: 20
+  basemodel_epochs: 10
+  batch_size: 64
+  log_interval: 50
+  num_workers: 8
+  seed: 137                   # Different seed for ensemble diversity
+
+  tokenizer_learning_rate: 0.0002
+  predictor_learning_rate: 0.000005
+
+  adam_beta1: 0.9
+  adam_beta2: 0.95
+  adam_weight_decay: 0.1
+  accumulation_steps: 1
+
+model_paths:
+  pretrained_tokenizer: "NeoQuasar/Kronos-Tokenizer-base"
+  pretrained_predictor: "NeoQuasar/Kronos-base"
+
+  exp_name: "cifr-btc-v2"
+  base_path: "../checkpoints"
+
+  base_save_path: ""
+  finetuned_tokenizer: ""
+
+  tokenizer_save_name: "tokenizer"
+  basemodel_save_name: "predictor"
+
+experiment:
+  name: "cifr_btc_v2_finetune"
+  description: "BTC/USDT v2 — seed=137 for ensemble diversity"
+  use_comet: false
+  train_tokenizer: true
+  train_basemodel: true
+  skip_existing: false
+
+device:
+  use_cuda: true
+  device_id: 0

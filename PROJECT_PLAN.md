@@ -2,7 +2,7 @@
 
 ## Overview
 
-CIFR-QUANT is a multi-market algorithmic trading system built on top of **Kronos**, the first open-source foundation model for financial candlestick (K-line) data. The system finetunes Kronos-base (102M parameters) into three market-specialized checkpoints, combines probabilistic forecasting with quantile-based risk management, and uses an LLM strategy layer to generate, evaluate, and select trading strategies.
+CIFR-QUANT is a dual-market multi-asset algorithmic trading system built on top of **Kronos**, the first open-source foundation model for financial candlestick (K-line) data. The system trades across two decorrelated markets — **Crypto** (15-25 assets, 15m, Binance) and **Commodities** (6-8 assets, 4h, TwelveData) — using transfer learning from market-representative finetuned checkpoints (BTC→all crypto, XAU→all commodities). Combines ensemble probabilistic forecasting with CQR-calibrated risk parity position sizing and an LLM strategy layer.
 
 **Foundation Model**: [Kronos](https://github.com/shiyu-coder/Kronos) (Tsinghua University, AAAI 2026)
 **License**: Kronos is MIT licensed. CIFR-QUANT is proprietary (no license).
@@ -12,117 +12,84 @@ CIFR-QUANT is a multi-market algorithmic trading system built on top of **Kronos
 ## System Architecture
 
 ```
-                    ┌─────────────────────────────┐
-                    │       MARKET DATA LAYER      │
-                    │  BTC/USDT  EUR/USD  XAU/USD  │
-                    │  (Binance) (OANDA)  (MT5/TV) │
-                    └──────────────┬───────────────┘
-                                   │
-                    ┌──────────────▼───────────────┐
-                    │     KRONOS FOUNDATION LAYER   │
-                    │                               │
-                    │  ┌─────────┐  ┌───────────┐  │
-                    │  │Tokenizer│─▶│ Predictor  │  │
-                    │  │(BSQ 2^20│  │(102M GPT)  │  │
-                    │  │vocab)   │  │Decoder-only│  │
-                    │  └─────────┘  └─────┬─────┘  │
-                    │                     │        │
-                    │  3 Finetuned Checkpoints:     │
-                    │  ckpt-btc / ckpt-eur / ckpt-xau│
-                    └──────────────┬───────────────┘
-                                   │
-                    ┌──────────────▼───────────────┐
-                    │   PROBABILISTIC FORECAST LAYER │
-                    │                               │
-                    │  sample_count=30 Monte Carlo   │
-                    │  → 30 future price paths       │
-                    │  → Mean forecast               │
-                    │  → Prediction intervals         │
-                    └──────────────┬───────────────┘
-                                   │
-                    ┌──────────────▼───────────────┐
-                    │   QUANTILE RISK LAYER         │
-                    │                               │
-                    │  Empirical quantiles from      │
-                    │  30 sampled paths:              │
-                    │  • 5th percentile  → Stop Loss │
-                    │  • 95th percentile → Take Profit│
-                    │  • CQR calibration for coverage │
-                    │    guarantee on held-out data   │
-                    └──────────────┬───────────────┘
-                                   │
-                    ┌──────────────▼───────────────┐
-                    │   LLM STRATEGY LAYER          │
-                    │                               │
-                    │  Input: forecasts + SL/TP +    │
-                    │  regime signals + market state  │
-                    │                               │
-                    │  Output: executable strategy    │
-                    │  code (NOT direct trade calls)  │
-                    │                               │
-                    │  Strategy types:                │
-                    │  • Trend following              │
-                    │  • Mean reversion               │
-                    │  • Breakout                     │
-                    │  • Volatility targeting          │
-                    └──────────────┬───────────────┘
-                                   │
-                    ┌──────────────▼───────────────┐
-                    │   BACKTEST & EVALUATION LAYER  │
-                    │                               │
-                    │  Walk-forward rolling backtest  │
-                    │  Multi-strategy comparison      │
-                    │  Realistic costs (spread,       │
-                    │  slippage, commission)           │
-                    │  Deflated Sharpe Ratio           │
-                    └─────────────────────────────────┘
+  CRYPTO MARKET (Binance)                    COMMODITY MARKET (TwelveData)
+  BTC ETH SOL AVAX LINK +20 assets           XAU XAG XPT WTI Brent NatGas Copper
+  15m candles, 24/7                           4h candles, trading hours
+         │                                            │
+         ▼                                            ▼
+  ┌──────────────────────┐                 ┌──────────────────────┐
+  │  CRYPTO ENSEMBLE     │                 │  COMMODITY ENSEMBLE  │
+  │  Zero-shot Kronos    │                 │  Zero-shot Kronos    │
+  │  + BTC-finetuned     │                 │  + XAU-finetuned v1  │
+  │  (transfers to all)  │                 │  + XAU-finetuned v2  │
+  │  50 MC paths/asset   │                 │  50 MC paths/asset   │
+  └──────────┬───────────┘                 └──────────┬───────────┘
+             │                                        │
+             └────────────────┬───────────────────────┘
+                              │
+               ┌──────────────▼───────────────┐
+               │  CQR-CALIBRATED UNCERTAINTY  │
+               │  Per-asset: SL (q05) / TP    │
+               │  (q95) / confidence / width  │
+               └──────────────┬───────────────┘
+                              │
+               ┌──────────────▼───────────────┐
+               │  PORTFOLIO ORCHESTRATOR       │
+               │  Filter: confidence ≥ 55%     │
+               │  Risk parity: 1/interval_width│
+               │  Max 10% per position         │
+               │  Cross-asset correlation adj.  │
+               │  Regime detection             │
+               └──────────────┬───────────────┘
+                              │
+               ┌──────────────▼───────────────┐
+               │  BACKTEST / LIVE EXECUTION    │
+               │  Walk-forward, realistic costs│
+               │  Target Sharpe 1.0-1.5        │
+               │  across 25-35 assets          │
+               └──────────────────────────────┘
 ```
 
 ---
 
-## Three Market Experiments
+## Two Market Strategy (Dual-Market Multi-Asset)
 
-### Experiment 1: Crypto — BTC/USDT
+### Market 1: Crypto (Binance, 15m candles)
 
 | Parameter | Value |
 |-----------|-------|
-| Instrument | BTC/USDT perpetual |
+| Assets | Tier 1 (5 majors): BTC, ETH, BNB, SOL, XRP. Tier 2 (10 large): ADA, AVAX, DOGE, DOT, LINK, MATIC, UNI, ATOM, LTC, NEAR. Tier 3 (10 mid): APT, ARB, FIL, INJ, OP, SUI, TIA, SEI, AAVE, MKR. |
+| Default | Tier 1+2 (15 assets) |
 | Timeframe | 15-minute candles |
 | Context window | 512 candles = ~5.3 days (24/7 market) |
-| Prediction horizon | 24–96 candles (6–24 hours) |
+| Prediction horizon | 48 candles (12 hours) |
 | Data source | Binance API (free, no auth for historical OHLCV) |
-| Data volume | 2+ years of 15-min data (~70k candles/year) |
-| Finetuned checkpoint | `checkpoints/ckpt-btc/` |
-| Rationale | Highest volatility, most data availability, 24/7 market with no gaps. Kronos live demo already uses BTC/USDT. Training data upweighted crypto during pre-training. |
+| Finetuned checkpoint | BTC-finetuned (`checkpoints/cifr-btc/`) — transfers to ALL crypto assets |
+| Costs | Spread ~0.01%, slippage ~0.02%, commission ~0.04% maker (VIP0) |
+| Rationale | Kronos pre-training heavily upweighted crypto. 24/7 market, no gaps. BTC checkpoint captures crypto-specific patterns (momentum cascades, leverage liquidations, microstructure) that transfer broadly. |
 
-### Experiment 2: Forex — EUR/USD
-
-| Parameter | Value |
-|-----------|-------|
-| Instrument | EUR/USD spot |
-| Timeframe | 1-hour candles |
-| Context window | 512 candles = ~21 trading days (~3 weeks) |
-| Prediction horizon | 24–168 candles (1 day – 1 week) |
-| Data source | OANDA API or FXCM |
-| Data volume | 2+ years of 1-hour data (~6.2k candles/year) |
-| Finetuned checkpoint | `checkpoints/ckpt-eur/` |
-| Rationale | Most liquid instrument on earth, negligible spreads (~0.1 pips). Session-based trading (London/NY/Tokyo) captured by Kronos temporal embeddings. 21 days context captures weekly cycles. |
-| **Volume note** | Forex spot has no centralized volume. Use `volume=0, amount=0` — Kronos handles this (fills with zeros). Tick volume from brokers is a poor proxy and should NOT be used. |
-| **Gap handling** | Forex closes on weekends. 512 hourly candles = ~21 *trading* days (~30 calendar days). Weekend gaps must be handled: either skip gaps (let temporal embeddings handle it) or insert NaN rows and let Kronos truncate. |
-
-### Experiment 3: Commodities — XAU/USD (Gold)
+### Market 2: Commodities (TwelveData, 4h candles)
 
 | Parameter | Value |
 |-----------|-------|
-| Instrument | XAU/USD (Gold spot) |
+| Assets | Precious: XAU/USD, XAG/USD, XPT/USD. Energy: WTI, Brent, Natural Gas. Industrial: Copper. |
+| Default | Precious + Energy (6 assets) |
 | Timeframe | 4-hour candles |
 | Context window | 512 candles = ~85 trading days (~3 months) |
-| Prediction horizon | 6–42 candles (1 day – 1 week) |
-| Data source | `yfinance` (GC=F gold futures) or TwelveData API. **NOT MetaTrader5** (Windows-only, won't run on macOS) |
-| Data volume | **5+ years** of 4-hour data (~1.5k candles/year = ~7.5k total). 2 years is too few for finetuning a 102M model on a single instrument. |
-| Finetuned checkpoint | `checkpoints/ckpt-xau/` |
-| Rationale | Strong trending behavior driven by real rates, central bank buying, risk-off flows. 3-month context captures macro trend structure. Futures exchanges (COMEX) were in Kronos training data. |
-| **Volume note** | Gold spot volume is unreliable from most free sources. Use `volume=0, amount=0` — Kronos handles missing volume gracefully (fills with zeros). Alternatively, use gold futures (GC=F) which have real volume. |
+| Prediction horizon | 6 candles (1 day) |
+| Data source | TwelveData API (free tier: 800 req/day) |
+| Finetuned checkpoint | XAU-finetuned v1 + v2 (`checkpoints/cifr-xau/`, `checkpoints/cifr-xau-v2/`) — transfers to ALL commodities |
+| Costs | Spread ~0.015%, slippage ~0.005%, commission ~0.01% |
+| Volume note | Spot has no real volume. Use `volume=0, amount=0` — Kronos handles this. Futures symbols (GC=F, SI=F, CL=F) have real volume. |
+| Rationale | XAU ensemble showed best IC (+0.393). Commodity macro dynamics (real rates, central bank flows, risk-off) transfer across precious metals and energy. Decorrelated from crypto. |
+
+### Why Not Forex?
+
+EUR/USD was dropped because: no centralized volume data, weekend gaps require special handling, weaker model fit (IC=-0.264), and adding a third market with one asset doesn't help breadth. The EUR v1/v2 checkpoints remain available if needed.
+
+### Transfer Learning Key Insight
+
+Finetuning on one representative asset per market captures market-level patterns that transfer to all assets in that market. This is far more capital-efficient than finetuning 25+ individual checkpoints, and the shared patterns (market microstructure, regime dynamics) are more important than asset-specific idiosyncrasies for Kronos's price-level predictions.
 
 ---
 
@@ -442,39 +409,49 @@ The model is re-predicted (not re-trained) at each step using the rolling contex
 - [x] Zero-shot inference verified on all 3 markets
 - [x] Zero-shot baseline: BTC IC=-0.34, DA=60%; EUR IC=-0.26, DA=40%
 
-### Phase 3: Finetuning 🔄 IN PROGRESS
+### Phase 3: Finetuning ✅ COMPLETE
 
-- [x] YAML configs for all markets (`finetune/config_{btc,eur,xau}.yaml`)
-- [x] SLURM scripts targeting L40S GPUs (`slurm/finetune_*.sh`)
-- [x] EUR v1 complete (val_loss=1.6098, 1h12m) — improved RMSE/MAE vs zero-shot
-- [x] XAU v1 complete (val_loss=0.9054, 1h39m) — **OVERFITTED** (zero-shot better)
-- [x] BTC tokenizer complete (val_loss=0.0027, 2.6h)
-- [ ] BTC predictor training (job 510044, L40S, ~6-8h)
-- [ ] EUR v2 training (job 510045, seed=137 for ensemble diversity)
-- [ ] XAU v2 training (job 510046, anti-overfitting: 15+5 epochs, lower LR)
-- [ ] Compare all checkpoints: ZS vs FT_v1 vs FT_v2
+- [x] YAML configs for all markets (`finetune/config_{btc,eur,xau,eur_v2,xau_v2}.yaml`)
+- [x] SLURM scripts targeting Ampere/A40 GPUs (`slurm/finetune_*.sh`)
+- [x] BTC v1 complete (tok val_loss=0.0027, pred trained ~10 epochs)
+- [x] EUR v1 complete (val_loss=1.6098, 1h12m)
+- [x] EUR v2 complete (val_loss=1.5521, 67min, seed=137)
+- [x] XAU v1 complete (val_loss=0.9054, 1h39m) — overfitted
+- [x] XAU v2 complete (val_loss=1.2316, 26min) — anti-overfitting config worked
 
-### Phase 3.5: Ensemble Evaluation ⏳ NEXT
+### Phase 3.5: Ensemble Evaluation ✅ COMPLETE
 
-- [ ] Run `eval_ensemble.py` with 50+ windows and bootstrap CIs
-- [ ] Benchmark: zero_shot, finetuned_v1, finetuned_v2, ensemble_eq, ensemble_full
-- [ ] Measure signal correlation between models (key for Grinold's Law)
-- [ ] Select best ensemble weights per market
+- [x] `eval_ensemble.py` with 50 windows and bootstrap 95% CIs
+- [x] XAU ensemble_full IC=+0.393 (best signal)
+- [x] EUR ensembles DA=60% (best direction)
+- [x] BTC finetuning improves RMSE, IC/DA flat (needs v2 for diversity)
+- [x] Results saved to `results/ensemble/ensemble_metrics.csv`
 
-### Phase 4: Quantile Risk Management ⏳ PENDING
+### Phase 3.75: Architecture Redesign ✅ COMPLETE
+
+- [x] Pivoted from 3-market×1-asset to 2-market×many-assets
+- [x] Crypto universe defined: 3 tiers, 25 assets (`configs/crypto_universe.py`)
+- [x] Commodity universe defined: precious+energy+industrial, 7 assets (`configs/commodity_universe.py`)
+- [x] Portfolio orchestrator built (`src/portfolio/orchestrator.py`)
+- [x] Multi-asset data fetcher created (`scripts/fetch_universe.py`)
+
+### Phase 4: Multi-Asset Data + CQR Calibration 🔄 NEXT
 
 - [x] Code written: `src/risk/cqr.py`, `src/risk/quantile.py`, `src/risk/position_sizer.py`
 - [x] `EnsemblePredictor.predict_with_quantiles()` generates probabilistic forecasts
-- [ ] Run CQR calibration on calibration split for each market
+- [ ] Fetch crypto universe data (Binance, 15 assets tier 1+2)
+- [ ] Fetch commodity universe data (TwelveData, 6 assets)
+- [ ] Create BTC v2 config (different seed for crypto ensemble diversity)
+- [ ] Run CQR calibration per-asset on calibration split
 - [ ] Validate coverage guarantees (90% target)
-- [ ] Tune position sizing: wide intervals → small positions
 
-### Phase 5: Backtest Engine ⏳ PENDING
+### Phase 5: Multi-Asset Portfolio Backtest ⏳ PENDING
 
 - [x] Code written: `src/backtest/engine.py`, `src/backtest/costs.py`, `src/backtest/metrics.py`
-- [ ] Walk-forward backtest with realistic costs (BTC ~0.07%, EUR ~1 pip, XAU ~$0.40)
-- [ ] Multi-strategy comparison
-- [ ] Sharpe, drawdown, Calmar evaluation
+- [ ] Walk-forward backtest across full portfolio (crypto + commodities)
+- [ ] Risk parity position sizing (1/interval_width)
+- [ ] Portfolio-level Sharpe, drawdown, Calmar evaluation
+- [ ] Per-asset contribution analysis
 
 ### Phase 5.5: Regime Detection ❌ NOT STARTED
 
@@ -491,9 +468,9 @@ The model is re-predicted (not re-trained) at each step using the rolling contex
 
 ### Phase 7: Integration & Final Evaluation ⏳ PENDING
 
-- [ ] End-to-end pipeline: data → ensemble forecast → CQR → regime → strategy → backtest
+- [ ] End-to-end pipeline: data → ensemble forecast → CQR → regime → orchestrator → backtest
 - [ ] Final test set evaluation (last 3 months, ONE TIME ONLY)
-- [ ] Cross-market performance comparison
+- [ ] Cross-market portfolio performance analysis
 - [ ] Document results and findings
 
 ---
@@ -782,4 +759,4 @@ For posterity, these are the 7 issues caught during review before implementation
 
 ---
 
-*Last updated: June 6, 2026 (rev 3 — ensemble architecture, research findings, phase status updates)*
+*Last updated: June 7, 2026 (rev 4 — dual-market multi-asset architecture, all finetuning complete, ensemble eval complete, EUR/Forex dropped)*
