@@ -19,4 +19,4 @@ ls -d checkpoints/cifr-*/predictor/best_model 2>/dev/null || echo "None found vi
 ls -d Kronos/checkpoints/cifr-*/predictor/best_model 2>/dev/null || echo "None found in Kronos/"
 nvidia-smi
 
-python scripts/eval_ensemble.py --markets eur xau --n-windows 50 --n-paths 10
+python scripts/eval_ensemble.py --markets btc eur xau --n-windows 50 --n-paths 10
