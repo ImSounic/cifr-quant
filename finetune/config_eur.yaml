@@ -1,7 +1,7 @@
 # EUR/USD 1-hour finetuning config for Kronos
 
 data:
-  data_path: "../data/processed/eur/tokenizer_train.csv"
+  data_path: "/home/s3702111/cifr-quant/data/processed/eur/tokenizer_train.csv"
   lookback_window: 512
   predict_window: 24        # 24 candles = 1 day at 1-hour
   max_context: 512

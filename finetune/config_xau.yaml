@@ -1,7 +1,7 @@
 # XAU/USD (Gold) 4-hour finetuning config for Kronos
 
 data:
-  data_path: "../data/processed/xau/tokenizer_train.csv"
+  data_path: "/home/s3702111/cifr-quant/data/processed/xau/tokenizer_train.csv"
   lookback_window: 512
   predict_window: 6         # 6 candles = 1 day at 4-hour
   max_context: 512
