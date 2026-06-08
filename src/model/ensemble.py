@@ -168,23 +168,38 @@ class EnsemblePredictor:
         """
         Generate Monte Carlo paths from all ensemble members.
 
-        Each model contributes paths proportional to its weight.
+        Each model contributes paths proportional to its weight. All of a
+        model's paths are drawn in a SINGLE batched forward pass via
+        ``predict_paths`` (utilising the GPU's batch dimension) instead of a
+        per-path Python loop. Falls back to the sequential loop if batched
+        generation fails for any reason, so behaviour degrades gracefully.
         """
+        from src.model.batched_inference import predict_paths
+
         all_paths = []
 
         for pred, w, name in zip(self.predictors, self.weights, self.names):
             # Allocate paths proportional to weight
             model_paths = max(1, int(n_paths * w / sum(self.weights)))
 
-            for _ in range(model_paths):
-                try:
-                    result = pred.predict(
-                        df=df, x_timestamp=x_timestamp, y_timestamp=y_timestamp,
-                        pred_len=pred_len, T=T, top_p=top_p, sample_count=1,
-                    )
-                    all_paths.append(result)
-                except Exception:
-                    continue
+            try:
+                paths = predict_paths(
+                    pred, df, x_timestamp, y_timestamp, pred_len,
+                    n_paths=model_paths, T=T, top_p=top_p,
+                )
+                all_paths.extend(paths)
+            except Exception as e:
+                # Fallback: original one-path-at-a-time loop.
+                print(f"  {name} batched paths failed ({e}); falling back to loop")
+                for _ in range(model_paths):
+                    try:
+                        result = pred.predict(
+                            df=df, x_timestamp=x_timestamp, y_timestamp=y_timestamp,
+                            pred_len=pred_len, T=T, top_p=top_p, sample_count=1,
+                        )
+                        all_paths.append(result)
+                    except Exception:
+                        continue
 
         if not all_paths:
             raise RuntimeError("No paths generated from ensemble")
