@@ -295,6 +295,10 @@ def main():
     if args.device == "auto":
         if torch.cuda.is_available():
             device = "cuda"
+            # Lovelace (L40S) tensor cores: enable TF32 for ~1.5-2x faster fp32
+            # matmuls with negligible accuracy impact on this workload.
+            torch.backends.cuda.matmul.allow_tf32 = True
+            torch.backends.cudnn.allow_tf32 = True
         elif hasattr(torch.backends, "mps") and torch.backends.mps.is_available():
             device = "mps"
         else:

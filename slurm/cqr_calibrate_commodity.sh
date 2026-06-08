@@ -3,8 +3,8 @@
 #SBATCH --partition=main-gpu
 #SBATCH --gres=gpu:lovelace:1
 #SBATCH --time=04:00:00
-#SBATCH --cpus-per-task=32
-#SBATCH --mem=128G
+#SBATCH --cpus-per-task=8
+#SBATCH --mem=32G
 #SBATCH --output=/dev/null
 #SBATCH --error=/dev/null
 
@@ -21,7 +21,7 @@ export HF_HUB_OFFLINE=1
 export PYTHONUNBUFFERED=1
 export CUDA_LAUNCH_BLOCKING=0
 export TORCH_CUDNN_V8_API_ENABLED=1
-export OMP_NUM_THREADS=32
+export OMP_NUM_THREADS=8
 
 {
     echo "=== Commodity CQR Calibration on $(hostname) ==="
