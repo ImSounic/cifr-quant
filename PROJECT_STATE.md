@@ -1,7 +1,7 @@
 # CIFR-QUANT: Project State
 
 > **Purpose**: Cross-session memory for Claude. Read this file at the start of every new session.
-> **Last updated**: June 7, 2026
+> **Last updated**: June 8, 2026
 
 ---
 
@@ -11,7 +11,7 @@ Dual-market multi-asset algorithmic trading system using the Kronos financial fo
 
 ---
 
-## Current Status: Phase 4 — Architecture Redesign Complete, Ready for Multi-Asset Data + CQR
+## Current Status: Phase 4 — CQR Calibration Running, BTC v2 Complete
 
 ### Strategic Pivot (June 6-7, 2026)
 
@@ -27,10 +27,27 @@ Pivoted from **3-market × 1-asset** (BTC, EUR, XAU) to **2-market × many-asset
 | Market | Version | Val Loss | Time | Status |
 |--------|---------|----------|------|--------|
 | BTC/USDT | v1 (tok+pred) | tok: 0.0027 | tok: 2.6h, pred: ~2h | ✅ Complete |
+| BTC/USDT | v2 (seed=137) | pred: 2.6672 | 9.6h (tok+pred) | ✅ Complete |
 | EUR/USD | v1 (seed=42) | 1.6098 | 1h12m | ✅ Complete |
 | EUR/USD | v2 (seed=137) | 1.5521 | 67min | ✅ Complete |
 | XAU/USD | v1 | 0.9054 | 1h39m | ✅ Complete (overfitted) |
 | XAU/USD | v2 (anti-overfit) | 1.2316 | 26min | ✅ Complete |
+
+### Multi-Asset Data Fetched (June 8, 2026)
+
+| Market | Assets | Candles Each | Source |
+|--------|--------|-------------|--------|
+| Crypto (15m) | 15 assets (tier 1+2) | ~155k (4.5 years) | Binance |
+| Commodities (4h) | XAU: 9,584 | 6 years | TwelveData |
+| Commodities (4h) | XAG, XPT, WTI, Brent, NatGas, Copper | ~2,800 each (2 years) | yfinance futures |
+
+Data saved to `data/raw/crypto/` and `data/raw/commodity/`.
+
+### CQR Calibration (June 8, 2026)
+
+SLURM job 510442 submitted on L40S. Script: `scripts/calibrate_cqr_multi.py`. Runs ensemble predictions across all 21 assets with 50 MC paths, computes conformity scores for 90% coverage. Results save to `results/cqr/cqr_calibrations.json`.
+
+**CHECK THIS FIRST** in next session — if `results/cqr/cqr_calibrations.json` is empty `{}`, the job failed. See Common Pitfalls below.
 
 ### Ensemble Evaluation Complete (50 windows, bootstrap CIs)
 
@@ -40,7 +57,7 @@ Pivoted from **3-market × 1-asset** (BTC, EUR, XAU) to **2-market × many-asset
 | EUR/USD | ensemble_eq / ensemble_full | Dir. Accuracy | **60%** |
 | BTC/USDT | finetuned_v1 | RMSE improvement | Yes, but IC/DA flat |
 
-**Key finding**: XAU ensemble_full is the strongest signal. BTC finetuning helps RMSE but needs v2 (different seed) for ensemble diversity. EUR ensembles best at direction.
+**Key finding**: XAU ensemble_full is the strongest signal. BTC v2 now complete (val_loss=2.6672) — crypto ensemble now has 3 models (ZS + BTC v1 + BTC v2).
 
 ---
 
@@ -97,6 +114,30 @@ Training saves to `Kronos/checkpoints/` (because script cd's into `Kronos/finetu
 - **HuggingFace**: Model cached on head node, jobs use `HF_HUB_OFFLINE=1`
 - **Conda activation**: `source $(conda info --base)/etc/profile.d/conda.sh && conda activate trade` (the direct path doesn't work)
 - **QOS limit**: May restrict concurrent GPU jobs. Submit BTC first if blocked.
+
+---
+
+## Development Environment
+
+Local dev/inference/backtest runs on the dev machine; all training/calibration runs on the HPC.
+
+### HP Windows 11 laptop (current dev machine, set up June 8, 2026)
+
+- **Repo**: `W:\cifr-quant` (W: is a `subst` of `C:\Work Drive`).
+- **Python env**: system-wide venv `mlenv` at `C:\Work Drive\envs\mlenv`. Activate in PowerShell by typing `mlenv` (a profile function running `Activate.ps1`). Python 3.12.10.
+- **GPU**: NVIDIA RTX PRO 1000 (Blackwell) Laptop GPU — `torch` cu128 build, `cuda.is_available() == True`. Local GPU inference works.
+- **Deps**: `mlenv` ships torch/transformers/pandas/numpy/scipy/einops/numba/matplotlib/plotly/wandb/tqdm. Added for this project: `ccxt yfinance twelvedata anthropic python-dotenv`. **`vectorbt` and `mapie` are NOT installed and NOT needed** — the backtest engine (`src/backtest/`) and CQR (`src/risk/cqr.py`) are custom implementations; installing them would risk downgrading numpy 2.4.3 / pandas 3.0.1 in the shared venv.
+- **Kronos**: tracked as a gitlink (mode 160000, commit `67b630e`) with **no `.gitmodules`**, so a fresh clone leaves `Kronos/` empty. Restore with: `git clone https://github.com/shiyu-coder/Kronos.git Kronos && cd Kronos && git checkout 67b630e`.
+- **Run commands** with `PYTHONPATH` set to repo root + `Kronos`, e.g. PowerShell: `$env:PYTHONPATH="W:\cifr-quant;W:\cifr-quant\Kronos"`.
+- **Not present locally** (gitignored, live on HPC): `data/` and `checkpoints/`. Sync from HPC before any local inference/backtest. Kronos-base/Tokenizer-base weights download from HuggingFace on first use (laptop has internet — do NOT set `HF_HUB_OFFLINE` locally).
+
+### New-laptop setup checklist
+
+1. `git clone https://github.com/ImSounic/cifr-quant.git`
+2. Restore Kronos (see clone command above).
+3. Activate `mlenv`; `pip install ccxt yfinance twelvedata anthropic python-dotenv` (rest already in mlenv).
+4. Sync `data/` and `checkpoints/` from HPC (`~/cifr-quant/`) if running locally.
+5. Create `.env` with `TWELVEDATA_API_KEY`, `ANTHROPIC_API_KEY` (see PROJECT_PLAN Environment Variables).
 
 ---
 
@@ -162,13 +203,13 @@ Training saves to `Kronos/checkpoints/` (because script cd's into `Kronos/finetu
 
 ## What's Next (In Order)
 
-1. **Fetch multi-asset data** — Run `scripts/fetch_universe.py` to download crypto (Binance) + commodity (TwelveData) OHLCV
-2. **Create BTC v2 config** — Different seed for crypto ensemble diversity (currently only 1 BTC finetuned checkpoint)
-3. **CQR calibration** — Per-asset calibration using ensemble predictions on calibration split
-4. **Multi-asset walk-forward backtest** — Portfolio-level with risk parity sizing, realistic costs per market
-5. **Regime detection** — HMM or volatility classifier, highest-impact addition
-6. **LLM strategy layer** — Generate and evaluate strategy code
-7. **Final test set evaluation** — Touched exactly ONCE
+1. ✅ **Fetch multi-asset data** — 15 crypto (Binance) + 7 commodity (TwelveData/yfinance) done
+2. ✅ **Create BTC v2 config + train** — seed=137, val_loss=2.6672, complete
+3. 🔄 **CQR calibration** — Job 510442 (June 8) **TIMED OUT** at 12h with empty `{}` (crypto leg too heavy + results only written at end). Script now saves per-asset incrementally and resumes. **Run order**: `sbatch slurm/cqr_calibrate_commodity.sh` (fast), then `sbatch slurm/cqr_calibrate_crypto.sh` (resubmit to resume if it hits 12h). Accumulates in `results/cqr/cqr_calibrations.json`.
+4. ⏳ **Multi-asset walk-forward backtest** — Portfolio-level with risk parity sizing, realistic costs per market. Script needed: `scripts/backtest_portfolio.py`
+5. ⏳ **Regime detection** — HMM or volatility classifier, highest-impact addition
+6. ⏳ **LLM strategy layer** — Generate and evaluate strategy code
+7. ⏳ **Final test set evaluation** — Touched exactly ONCE
 
 ---
 
@@ -203,6 +244,32 @@ Training saves to `Kronos/checkpoints/` (because script cd's into `Kronos/finetu
 | Conda activation fails | Direct path doesn't exist | Use: `source $(conda info --base)/etc/profile.d/conda.sh && conda activate trade` |
 | XAU overfitting | 50 tokenizer + 20 predictor epochs on 9.5k candles | v2: 15+5 epochs, lower LR, higher weight decay |
 | BTC killed at time limit | 8h too short for predictor training | Updated to 20h, `skip_existing: true` skips completed tokenizer |
+| CQR job TIMEOUT, empty `{}` results (job 510442) | Crypto leg ~40h (15 assets × ~179 windows × ~48 MC calls × 48 steps) >> 12h wall, and results were only written at the very end so timeout lost everything. tee log also never appeared (`slurm/logs/` didn't exist) | `calibrate_cqr_multi.py` now saves per-asset incrementally + resumes (skips assets already in JSON; `--force` to redo). Split into `slurm/cqr_calibrate_commodity.sh` (cheap) + `slurm/cqr_calibrate_crypto.sh` (n_paths 30, `--step-size 96`, resubmit to resume). All SLURM scripts `mkdir -p logs` before tee |
+| SLURM logs not visible | Compute nodes have delayed NFS sync | Logs appear only AFTER job completes. Use `tee` inside script for real-time, or `sacct -j JOBID` to check status |
+| CQR tqdm error | Old tqdm version on HPC | Don't use `miniinterval` kwarg in tqdm constructor |
+| TwelveData commodity failures | Free tier only supports XAU/USD | Use `scripts/fetch_commodities_yf.py` for other commodities via yfinance futures |
+| Git merge conflicts on HPC | Local edits on HPC diverge from Mac | `git stash && git pull --rebase && git stash pop`, or `git checkout --theirs <file>` |
+
+---
+
+## Development Environment
+
+### Primary: HP Laptop (as of June 8, 2026)
+
+- Clone: `git clone https://github.com/ImSounic/cifr-quant.git`
+- Python env: `conda create -n trade python=3.11 && conda activate trade`
+- Install: `pip install torch transformers pandas numpy ccxt yfinance twelvedata tqdm scipy`
+- Kronos submodule: `cd Kronos && pip install -e .` (or ensure Kronos/ is on PYTHONPATH)
+- HuggingFace: `pip install huggingface_hub && huggingface-cli login` (read token)
+- Data: `data/` is gitignored. Re-fetch with `python scripts/fetch_universe.py --market crypto --tiers 1 2`
+- Checkpoints: `checkpoints/` is gitignored. For inference, download from HPC: `scp -r s3702111@hpc-head1.ewi.utwente.nl:~/cifr-quant/Kronos/checkpoints ./checkpoints/`
+- SSH to HPC: `ssh s3702111@hpc-head1.ewi.utwente.nl`
+
+### Training: UTwente HPC (SLURM)
+
+- All finetuning and GPU-heavy eval runs on HPC
+- Checkpoints live at `~/cifr-quant/Kronos/checkpoints/` on HPC, symlinked to `~/cifr-quant/checkpoints/`
+- Use L40S (Lovelace) GPUs: `--gres=gpu:lovelace:1`
 
 ---
 

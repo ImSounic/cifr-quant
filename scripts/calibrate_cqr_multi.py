@@ -28,6 +28,28 @@ sys.path.insert(0, str(PROJECT_ROOT / "Kronos"))
 from configs.base_config import DATA_RAW_DIR, CHECKPOINTS_DIR, RESULTS_DIR
 
 
+def save_results(results: dict, output_path: Path) -> None:
+    """Atomically persist calibration results so a timeout never loses progress."""
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    tmp = output_path.with_suffix(".json.tmp")
+    with open(tmp, "w") as f:
+        json.dump(results, f, indent=2)
+    tmp.replace(output_path)
+
+
+def load_results(output_path: Path) -> dict:
+    """Load existing calibrations for resume; empty dict if none/invalid."""
+    if output_path.exists():
+        try:
+            with open(output_path) as f:
+                data = json.load(f)
+            if isinstance(data, dict):
+                return data
+        except (json.JSONDecodeError, OSError):
+            pass
+    return {}
+
+
 def load_raw_data(market: str, symbol_key: str) -> pd.DataFrame:
     """Load raw OHLCV CSV for an asset."""
     if market == "crypto":
@@ -132,6 +154,7 @@ def calibrate_asset(
     n_paths: int = 30,
     step_size: int = None,
     coverage: float = 0.90,
+    max_windows: int = None,
 ):
     """
     Run CQR calibration for a single asset.
@@ -157,6 +180,9 @@ def calibrate_asset(
     print(f"    Rolling {total_windows} calibration windows (step={step_size})...", flush=True)
 
     window_indices = list(range(0, len(cal_df) - pred_len, step_size))
+    if max_windows is not None:
+        window_indices = window_indices[:max_windows]
+    print(f"    Using {len(window_indices)} windows (max_windows={max_windows})", flush=True)
     pbar = tqdm(window_indices, desc="    Cal windows", file=sys.stdout)
 
     for i in pbar:
@@ -259,6 +285,10 @@ def main():
     parser.add_argument("--coverage", type=float, default=0.90)
     parser.add_argument("--step-size", type=int, default=None,
                         help="Step size between calibration windows (default: pred_len)")
+    parser.add_argument("--max-cal-windows", type=int, default=None,
+                        help="Cap calibration windows per asset to bound runtime")
+    parser.add_argument("--force", action="store_true",
+                        help="Recompute assets already present in the output JSON")
     parser.add_argument("--device", default="auto")
     args = parser.parse_args()
 
@@ -272,7 +302,14 @@ def main():
     else:
         device = args.device
 
-    results = {}
+    # Resume: load any previously calibrated assets so a re-submit continues
+    # instead of starting over (the crypto leg can exceed a single SLURM window).
+    output_dir = RESULTS_DIR / "cqr"
+    output_path = output_dir / "cqr_calibrations.json"
+    results = {} if args.force else load_results(output_path)
+    if results:
+        print(f"Resuming: {len(results)} asset(s) already calibrated, will skip "
+              f"unless --force: {sorted(results)}", flush=True)
 
     # --- CRYPTO ---
     if args.market in ("crypto", "all"):
@@ -282,9 +319,17 @@ def main():
 
         from configs.crypto_universe import get_crypto_configs
         configs = get_crypto_configs(tiers=(1, 2))
-        ensemble = build_ensemble("crypto", device)
+
+        pending = [s for s in configs if args.force or s not in results]
+        if not pending:
+            print("  All crypto assets already calibrated, skipping.", flush=True)
+        else:
+            ensemble = build_ensemble("crypto", device)
 
         for idx, (symbol, cfg) in enumerate(configs.items()):
+            if symbol not in pending:
+                print(f"\n  [{idx+1}/{len(configs)}] {symbol} — already calibrated, skipping", flush=True)
+                continue
             print(f"\n  [{idx+1}/{len(configs)}] {symbol}", flush=True)
             try:
                 df = load_raw_data("crypto", symbol)
@@ -298,6 +343,7 @@ def main():
                     ensemble, train_df, cal_df, val_df,
                     pred_len=cfg.pred_len, n_paths=args.n_paths,
                     step_size=step, coverage=args.coverage,
+                    max_windows=args.max_cal_windows,
                 )
 
                 if cal_result:
@@ -308,6 +354,8 @@ def main():
                         "coverage_achieved": cal_result.coverage_achieved,
                         "n_calibration": cal_result.n_calibration,
                     }
+                    save_results(results, output_path)
+                    print(f"    Saved progress ({len(results)} assets) to {output_path}", flush=True)
             except Exception as e:
                 print(f"    FAILED: {e}")
 
@@ -319,7 +367,12 @@ def main():
 
         from configs.commodity_universe import get_commodity_configs
         configs = get_commodity_configs(categories=("precious", "energy"))
-        ensemble = build_ensemble("commodity", device)
+
+        pending = [k for k in configs if args.force or k not in results]
+        if not pending:
+            print("  All commodity assets already calibrated, skipping.", flush=True)
+        else:
+            ensemble = build_ensemble("commodity", device)
 
         # Map config keys to data file names
         key_to_file = {
@@ -333,6 +386,9 @@ def main():
         }
 
         for idx, (key, cfg) in enumerate(configs.items()):
+            if key not in pending:
+                print(f"\n  [{idx+1}/{len(configs)}] {key} — already calibrated, skipping", flush=True)
+                continue
             file_key = key_to_file.get(key, key.replace("/", "_").lower())
             print(f"\n  [{idx+1}/{len(configs)}] {key} → {cfg.instrument}", flush=True)
             try:
@@ -358,6 +414,7 @@ def main():
                     ensemble, train_df, cal_df, val_df,
                     pred_len=cfg.pred_len, n_paths=args.n_paths,
                     step_size=step, coverage=args.coverage,
+                    max_windows=args.max_cal_windows,
                 )
 
                 if cal_result:
@@ -369,15 +426,13 @@ def main():
                         "coverage_achieved": cal_result.coverage_achieved,
                         "n_calibration": cal_result.n_calibration,
                     }
+                    save_results(results, output_path)
+                    print(f"    Saved progress ({len(results)} assets) to {output_path}", flush=True)
             except Exception as e:
                 print(f"    FAILED: {e}", flush=True)
 
-    # Save results
-    output_dir = RESULTS_DIR / "cqr"
-    output_dir.mkdir(parents=True, exist_ok=True)
-    output_path = output_dir / "cqr_calibrations.json"
-    with open(output_path, "w") as f:
-        json.dump(results, f, indent=2)
+    # Final save (per-asset saves already happened incrementally)
+    save_results(results, output_path)
     print(f"\n\nSaved CQR calibrations to {output_path}")
 
     # Summary

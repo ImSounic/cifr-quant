@@ -231,3 +231,8 @@ results/
 # OS
 .DS_Store
 Kronos/
+
+# Claude Code (never commit AI tooling artifacts)
+.claude/
+CLAUDE.md
+.claude.json
