@@ -117,6 +117,30 @@ Training saves to `Kronos/checkpoints/` (because script cd's into `Kronos/finetu
 
 ---
 
+## Development Environment
+
+Local dev/inference/backtest runs on the dev machine; all training/calibration runs on the HPC.
+
+### HP Windows 11 laptop (current dev machine, set up June 8, 2026)
+
+- **Repo**: `W:\cifr-quant` (W: is a `subst` of `C:\Work Drive`).
+- **Python env**: system-wide venv `mlenv` at `C:\Work Drive\envs\mlenv`. Activate in PowerShell by typing `mlenv` (a profile function running `Activate.ps1`). Python 3.12.10.
+- **GPU**: NVIDIA RTX PRO 1000 (Blackwell) Laptop GPU — `torch` cu128 build, `cuda.is_available() == True`. Local GPU inference works.
+- **Deps**: `mlenv` ships torch/transformers/pandas/numpy/scipy/einops/numba/matplotlib/plotly/wandb/tqdm. Added for this project: `ccxt yfinance twelvedata anthropic python-dotenv`. **`vectorbt` and `mapie` are NOT installed and NOT needed** — the backtest engine (`src/backtest/`) and CQR (`src/risk/cqr.py`) are custom implementations; installing them would risk downgrading numpy 2.4.3 / pandas 3.0.1 in the shared venv.
+- **Kronos**: tracked as a gitlink (mode 160000, commit `67b630e`) with **no `.gitmodules`**, so a fresh clone leaves `Kronos/` empty. Restore with: `git clone https://github.com/shiyu-coder/Kronos.git Kronos && cd Kronos && git checkout 67b630e`.
+- **Run commands** with `PYTHONPATH` set to repo root + `Kronos`, e.g. PowerShell: `$env:PYTHONPATH="W:\cifr-quant;W:\cifr-quant\Kronos"`.
+- **Not present locally** (gitignored, live on HPC): `data/` and `checkpoints/`. Sync from HPC before any local inference/backtest. Kronos-base/Tokenizer-base weights download from HuggingFace on first use (laptop has internet — do NOT set `HF_HUB_OFFLINE` locally).
+
+### New-laptop setup checklist
+
+1. `git clone https://github.com/ImSounic/cifr-quant.git`
+2. Restore Kronos (see clone command above).
+3. Activate `mlenv`; `pip install ccxt yfinance twelvedata anthropic python-dotenv` (rest already in mlenv).
+4. Sync `data/` and `checkpoints/` from HPC (`~/cifr-quant/`) if running locally.
+5. Create `.env` with `TWELVEDATA_API_KEY`, `ANTHROPIC_API_KEY` (see PROJECT_PLAN Environment Variables).
+
+---
+
 ## File Map
 
 ### Configs
@@ -181,7 +205,7 @@ Training saves to `Kronos/checkpoints/` (because script cd's into `Kronos/finetu
 
 1. ✅ **Fetch multi-asset data** — 15 crypto (Binance) + 7 commodity (TwelveData/yfinance) done
 2. ✅ **Create BTC v2 config + train** — seed=137, val_loss=2.6672, complete
-3. 🔄 **CQR calibration** — SLURM job 510442 submitted June 8. Check `results/cqr/cqr_calibrations.json`
+3. 🔄 **CQR calibration** — Job 510442 (June 8) **TIMED OUT** at 12h with empty `{}` (crypto leg too heavy + results only written at end). Script now saves per-asset incrementally and resumes. **Run order**: `sbatch slurm/cqr_calibrate_commodity.sh` (fast), then `sbatch slurm/cqr_calibrate_crypto.sh` (resubmit to resume if it hits 12h). Accumulates in `results/cqr/cqr_calibrations.json`.
 4. ⏳ **Multi-asset walk-forward backtest** — Portfolio-level with risk parity sizing, realistic costs per market. Script needed: `scripts/backtest_portfolio.py`
 5. ⏳ **Regime detection** — HMM or volatility classifier, highest-impact addition
 6. ⏳ **LLM strategy layer** — Generate and evaluate strategy code
@@ -220,6 +244,7 @@ Training saves to `Kronos/checkpoints/` (because script cd's into `Kronos/finetu
 | Conda activation fails | Direct path doesn't exist | Use: `source $(conda info --base)/etc/profile.d/conda.sh && conda activate trade` |
 | XAU overfitting | 50 tokenizer + 20 predictor epochs on 9.5k candles | v2: 15+5 epochs, lower LR, higher weight decay |
 | BTC killed at time limit | 8h too short for predictor training | Updated to 20h, `skip_existing: true` skips completed tokenizer |
+| CQR job TIMEOUT, empty `{}` results (job 510442) | Crypto leg ~40h (15 assets × ~179 windows × ~48 MC calls × 48 steps) >> 12h wall, and results were only written at the very end so timeout lost everything. tee log also never appeared (`slurm/logs/` didn't exist) | `calibrate_cqr_multi.py` now saves per-asset incrementally + resumes (skips assets already in JSON; `--force` to redo). Split into `slurm/cqr_calibrate_commodity.sh` (cheap) + `slurm/cqr_calibrate_crypto.sh` (n_paths 30, `--step-size 96`, resubmit to resume). All SLURM scripts `mkdir -p logs` before tee |
 | SLURM logs not visible | Compute nodes have delayed NFS sync | Logs appear only AFTER job completes. Use `tee` inside script for real-time, or `sacct -j JOBID` to check status |
 | CQR tqdm error | Old tqdm version on HPC | Don't use `miniinterval` kwarg in tqdm constructor |
 | TwelveData commodity failures | Free tier only supports XAU/USD | Use `scripts/fetch_commodities_yf.py` for other commodities via yfinance futures |
