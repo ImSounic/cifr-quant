@@ -42,8 +42,16 @@ BTC_COSTS = CostModel(spread_pct=0.0001, slippage_pct=0.0002, commission_pct=0.0
 EUR_COSTS = CostModel(spread_pct=0.00008, slippage_pct=0.00002, commission_pct=0.0)
 XAU_COSTS = CostModel(spread_pct=0.00015, slippage_pct=0.00005, commission_pct=0.0001)
 
+# Market-level presets for the multi-asset portfolio backtest.
+# Crypto: Binance taker fee 0.04% + spread/slippage (liquid majors+large caps).
+# Commodity: tighter spreads, small slippage, modest commission (4h bars, futures).
+CRYPTO_COSTS = CostModel(spread_pct=0.0002, slippage_pct=0.0003, commission_pct=0.0004)
+COMMODITY_COSTS = CostModel(spread_pct=0.00015, slippage_pct=0.00010, commission_pct=0.0001)
+
 COST_MODELS = {
     "btc": BTC_COSTS,
     "eur": EUR_COSTS,
     "xau": XAU_COSTS,
+    "crypto": CRYPTO_COSTS,
+    "commodity": COMMODITY_COSTS,
 }
