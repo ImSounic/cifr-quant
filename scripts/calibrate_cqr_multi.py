@@ -157,7 +157,7 @@ def calibrate_asset(
     print(f"    Rolling {total_windows} calibration windows (step={step_size})...", flush=True)
 
     window_indices = list(range(0, len(cal_df) - pred_len, step_size))
-    pbar = tqdm(window_indices, desc="    Cal windows", file=sys.stdout, miniinterval=1.0)
+    pbar = tqdm(window_indices, desc="    Cal windows", file=sys.stdout)
 
     for i in pbar:
         # Context: lookback candles ending at cal position i
