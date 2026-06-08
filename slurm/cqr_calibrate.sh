@@ -18,11 +18,17 @@ export CUDA_LAUNCH_BLOCKING=0
 export TORCH_CUDNN_V8_API_ENABLED=1
 export OMP_NUM_THREADS=32
 
+# Force unbuffered output — critical for live tailing
+export PYTHONUNBUFFERED=1
+export PYTHONDONTWRITEBYTECODE=1
+
 echo "=== Multi-Asset CQR Calibration on $(hostname) ==="
 nvidia-smi
 
 # 50 MC paths for better quantile estimates, L40S can handle it
+# stdout and stderr both go to .out for easy tailing
 python -u scripts/calibrate_cqr_multi.py \
     --market all \
     --n-paths 50 \
-    --coverage 0.90
+    --coverage 0.90 \
+    2>&1

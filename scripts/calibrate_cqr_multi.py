@@ -19,6 +19,7 @@ import pandas as pd
 import torch
 from pathlib import Path
 from datetime import timedelta
+from tqdm import tqdm
 
 PROJECT_ROOT = Path(__file__).parent.parent
 sys.path.insert(0, str(PROJECT_ROOT))
@@ -153,9 +154,12 @@ def calibrate_asset(
     q_upper_list = []
 
     total_windows = (len(cal_df) - pred_len) // step_size
-    print(f"    Rolling {total_windows} calibration windows (step={step_size})...")
+    print(f"    Rolling {total_windows} calibration windows (step={step_size})...", flush=True)
 
-    for i in range(0, len(cal_df) - pred_len, step_size):
+    window_indices = list(range(0, len(cal_df) - pred_len, step_size))
+    pbar = tqdm(window_indices, desc="    Cal windows", file=sys.stdout, miniinterval=1.0)
+
+    for i in pbar:
         # Context: lookback candles ending at cal position i
         ctx_end = lookback + i
         ctx_start = ctx_end - lookback
@@ -187,9 +191,12 @@ def calibrate_asset(
             y_true_list.append(y_actual)
             q_lower_list.append(q_lo)
             q_upper_list.append(q_hi)
+
+            pbar.set_postfix({"samples": len(y_true_list), "last_q_lo": f"{q_lo:.2f}", "last_q_hi": f"{q_hi:.2f}"})
         except Exception as e:
-            print(f"    Window {i} failed: {e}")
+            print(f"    Window {i} failed: {e}", flush=True)
             continue
+    pbar.close()
 
     if len(y_true_list) < 5:
         print(f"    WARNING: Only {len(y_true_list)} calibration samples, too few for CQR")
@@ -269,22 +276,22 @@ def main():
 
     # --- CRYPTO ---
     if args.market in ("crypto", "all"):
-        print(f"\n{'='*60}")
-        print("  CRYPTO CQR CALIBRATION")
-        print(f"{'='*60}")
+        print(f"\n{'='*60}", flush=True)
+        print("  CRYPTO CQR CALIBRATION", flush=True)
+        print(f"{'='*60}", flush=True)
 
         from configs.crypto_universe import get_crypto_configs
         configs = get_crypto_configs(tiers=(1, 2))
         ensemble = build_ensemble("crypto", device)
 
-        for symbol, cfg in configs.items():
-            print(f"\n  [{symbol}]")
+        for idx, (symbol, cfg) in enumerate(configs.items()):
+            print(f"\n  [{idx+1}/{len(configs)}] {symbol}", flush=True)
             try:
                 df = load_raw_data("crypto", symbol)
-                print(f"    Data: {len(df)} candles ({df['timestamps'].iloc[0].date()} to {df['timestamps'].iloc[-1].date()})")
+                print(f"    Data: {len(df)} candles ({df['timestamps'].iloc[0].date()} to {df['timestamps'].iloc[-1].date()})", flush=True)
 
                 train_df, cal_df, val_df = split_calibration(df)
-                print(f"    Cal window: {len(cal_df)} candles, Val: {len(val_df)} candles")
+                print(f"    Cal window: {len(cal_df)} candles, Val: {len(val_df)} candles", flush=True)
 
                 step = args.step_size or cfg.pred_len
                 cal_result = calibrate_asset(
@@ -306,9 +313,9 @@ def main():
 
     # --- COMMODITIES ---
     if args.market in ("commodity", "all"):
-        print(f"\n{'='*60}")
-        print("  COMMODITY CQR CALIBRATION")
-        print(f"{'='*60}")
+        print(f"\n{'='*60}", flush=True)
+        print("  COMMODITY CQR CALIBRATION", flush=True)
+        print(f"{'='*60}", flush=True)
 
         from configs.commodity_universe import get_commodity_configs
         configs = get_commodity_configs(categories=("precious", "energy"))
@@ -325,9 +332,9 @@ def main():
             "COPPER": "copper_usd",
         }
 
-        for key, cfg in configs.items():
+        for idx, (key, cfg) in enumerate(configs.items()):
             file_key = key_to_file.get(key, key.replace("/", "_").lower())
-            print(f"\n  [{key} → {cfg.instrument}]")
+            print(f"\n  [{idx+1}/{len(configs)}] {key} → {cfg.instrument}", flush=True)
             try:
                 # Try loading from commodity dir
                 path = DATA_RAW_DIR / "commodity" / f"{file_key}_4h.csv"
@@ -341,10 +348,10 @@ def main():
 
                 df = pd.read_csv(path)
                 df["timestamps"] = pd.to_datetime(df["timestamps"])
-                print(f"    Data: {len(df)} candles ({df['timestamps'].iloc[0].date()} to {df['timestamps'].iloc[-1].date()})")
+                print(f"    Data: {len(df)} candles ({df['timestamps'].iloc[0].date()} to {df['timestamps'].iloc[-1].date()})", flush=True)
 
                 train_df, cal_df, val_df = split_calibration(df)
-                print(f"    Cal window: {len(cal_df)} candles, Val: {len(val_df)} candles")
+                print(f"    Cal window: {len(cal_df)} candles, Val: {len(val_df)} candles", flush=True)
 
                 step = args.step_size or cfg.pred_len
                 cal_result = calibrate_asset(
@@ -363,7 +370,7 @@ def main():
                         "n_calibration": cal_result.n_calibration,
                     }
             except Exception as e:
-                print(f"    FAILED: {e}")
+                print(f"    FAILED: {e}", flush=True)
 
     # Save results
     output_dir = RESULTS_DIR / "cqr"
