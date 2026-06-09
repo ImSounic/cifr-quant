@@ -1,16 +1,15 @@
 """Multi-asset dual-market portfolio backtest (walk-forward, CQR-gated).
 
-Runs a joint risk-parity portfolio per market on the held-out test window
-(last 90 days), then combines the two markets into a single daily top-line.
+CPU-only: reads cached Kronos forecasts (results/forecasts/, built on HPC by
+scripts/build_forecast_cache.py) and runs an injected STRATEGY + SIZER over the
+walk-forward grid, then combines the two markets into a single daily top-line.
 
-Uses the SAME ensemble that CQR was calibrated on (zero-shot + 2 finetunes per
-market) and applies the per-asset CQR corrections from
-`results/cqr/cqr_calibrations.json` to widen the q05/q95 bands used for SL/TP
-and risk-parity sizing.
+Because forecasts are cached, swapping --strategy / --sizer is instant and needs
+no GPU — this is how we A/B strategies.
 
 Usage:
-    python scripts/backtest_portfolio.py --market all --n-paths 30
-    python scripts/backtest_portfolio.py --market crypto --n-paths 30 --capital 100000
+    python scripts/build_forecast_cache.py --market all      # once, on HPC (GPU)
+    python scripts/backtest_portfolio.py  --market all --strategy directional_momentum
 """
 
 import sys
@@ -18,7 +17,6 @@ import json
 import argparse
 import numpy as np
 import pandas as pd
-import torch
 from pathlib import Path
 
 PROJECT_ROOT = Path(__file__).parent.parent
@@ -29,12 +27,30 @@ from configs.base_config import DATA_RAW_DIR, RESULTS_DIR
 from src.backtest.costs import COST_MODELS
 from src.backtest.metrics import evaluate_trades
 from src.backtest.portfolio_engine import run_market_backtest
+from src.backtest.strategies import DirectionalMomentum
+from src.backtest.sizing import InverseWidthRiskParity, EqualWeight
+from src.model.forecast_cache import load_forecast_cache
 
 COMMODITY_KEY_TO_FILE = {
     "XAU/USD": "xau_usd", "XAG/USD": "xag_usd", "XPT/USD": "xpt_usd",
     "CRUDE_OIL": "wti_usd", "BRENT_OIL": "brent_usd",
     "NATURAL_GAS": "ng_usd", "COPPER": "copper_usd",
 }
+
+
+def build_strategy(name, min_confidence):
+    if name == "directional_momentum":
+        return DirectionalMomentum(min_confidence=min_confidence)
+    raise ValueError(f"Unknown strategy '{name}'. Available: directional_momentum "
+                     "(more land in Phase B: mean_reversion, regime_gated_trend, ...)")
+
+
+def build_sizer(name, max_position_pct):
+    if name == "inverse_width_risk_parity":
+        return InverseWidthRiskParity(max_position_pct=max_position_pct)
+    if name == "equal_weight":
+        return EqualWeight(max_position_pct=max_position_pct)
+    raise ValueError(f"Unknown sizer '{name}'.")
 
 
 def load_cqr(path: Path) -> dict:
@@ -91,18 +107,24 @@ def market_metrics(result, n_trials=1):
 
 
 def daily_equity(result) -> pd.Series:
-    """Resample a market's per-rebalance equity to a daily curve."""
     s = result.equity.sort_index()
     if s.empty:
         return s
-    daily = s.resample("1D").last().ffill()
-    return daily
+    return s.resample("1D").last().ffill()
+
+
+def exit_mix(result) -> dict:
+    mix = {"tp": 0, "sl": 0, "timeout": 0}
+    for t in result.trades:
+        mix[t.exit_reason] = mix.get(t.exit_reason, 0) + 1
+    return mix
 
 
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--market", choices=["crypto", "commodity", "all"], default="all")
-    ap.add_argument("--n-paths", type=int, default=30)
+    ap.add_argument("--strategy", default="directional_momentum")
+    ap.add_argument("--sizer", default="inverse_width_risk_parity")
     ap.add_argument("--capital", type=float, default=100_000.0,
                     help="Total capital, split evenly across the active markets")
     ap.add_argument("--min-confidence", type=float, default=0.55)
@@ -110,31 +132,18 @@ def main():
     ap.add_argument("--max-drawdown-halt", type=float, default=0.25)
     ap.add_argument("--test-days", type=int, default=90)
     ap.add_argument("--step-size", type=int, default=None)
-    ap.add_argument("--device", default="auto")
+    ap.add_argument("--tag", default=None, help="Suffix for output files (for A/B runs)")
     args = ap.parse_args()
 
-    device = args.device
-    if device == "auto":
-        if torch.cuda.is_available():
-            device = "cuda"
-            torch.backends.cuda.matmul.allow_tf32 = True
-            torch.backends.cudnn.allow_tf32 = True
-        elif hasattr(torch.backends, "mps") and torch.backends.mps.is_available():
-            device = "mps"
-        else:
-            device = "cpu"
-    print(f"Device: {device}", flush=True)
-
-    from src.model.build import build_market_ensemble
-
+    forecasts_dir = RESULTS_DIR / "forecasts"
     corrections = load_cqr(RESULTS_DIR / "cqr" / "cqr_calibrations.json")
     print(f"Loaded {len(corrections)} CQR corrections", flush=True)
+    print(f"Strategy={args.strategy}  Sizer={args.sizer}", flush=True)
 
     markets = ["crypto", "commodity"] if args.market == "all" else [args.market]
     per_market_capital = args.capital / len(markets)
 
-    results = {}
-    reports = {}
+    results, reports = {}, {}
 
     for market in markets:
         print(f"\n{'='*64}\n  {market.upper()} PORTFOLIO BACKTEST\n{'='*64}", flush=True)
@@ -151,20 +160,27 @@ def main():
             print(f"  No data for {market}, skipping.", flush=True)
             continue
 
-        ensemble = build_market_ensemble(market, device=device)
+        forecasts = load_forecast_cache(market, forecasts_dir)
+        print(f"  Loaded {len(forecasts)} cached forecasts for {market}", flush=True)
+
+        strategy = build_strategy(args.strategy, args.min_confidence)
+        sizer = build_sizer(args.sizer, args.max_position_pct)
+
         res = run_market_backtest(
-            market=market, ensemble=ensemble,
-            asset_dfs=dfs, asset_pred_len=pred_len, corrections=corrections,
+            market=market,
+            asset_dfs=dfs, asset_pred_len=pred_len,
             cost_model=COST_MODELS[market],
-            n_paths=args.n_paths, step_size=args.step_size,
-            test_days=args.test_days, min_confidence=args.min_confidence,
-            max_position_pct=args.max_position_pct,
+            forecasts=forecasts, corrections=corrections,
+            strategy=strategy, sizer=sizer,
+            step_size=args.step_size, test_days=args.test_days,
             initial_capital=per_market_capital,
             max_drawdown_halt=args.max_drawdown_halt,
         )
         results[market] = res
         reports[market] = market_metrics(res)
-        print(f"\n--- {market} result ---\n{reports[market]}", flush=True)
+        print(f"\n--- {market} result ({res.strategy_name}/{res.sizer_name}) ---", flush=True)
+        print(reports[market], flush=True)
+        print(f"  Exit mix: {exit_mix(res)}", flush=True)
 
     # Combined daily top-line.
     combined_report = None
@@ -188,26 +204,22 @@ def main():
     # Persist.
     out_dir = RESULTS_DIR / "backtest"
     out_dir.mkdir(parents=True, exist_ok=True)
+    tag = f"_{args.tag}" if args.tag else ""
     summary = {"config": vars(args), "markets": {}}
     for m, r in results.items():
         rep = reports[m]
         summary["markets"][m] = {
-            "initial_capital": r.initial_capital,
-            "final_capital": r.final_capital,
-            "n_rebalances": r.n_rebalances,
-            "n_trades": rep.n_trades,
-            "total_return": rep.total_return,
-            "annualized_return": rep.annualized_return,
-            "sharpe": rep.sharpe_ratio,
-            "max_drawdown": rep.max_drawdown,
-            "calmar": rep.calmar_ratio,
-            "win_rate": rep.win_rate,
-            "profit_factor": rep.profit_factor,
-            "test_start": str(r.test_start.date()),
-            "test_end": str(r.test_end.date()),
+            "strategy": r.strategy_name, "sizer": r.sizer_name,
+            "initial_capital": r.initial_capital, "final_capital": r.final_capital,
+            "n_rebalances": r.n_rebalances, "n_trades": rep.n_trades,
+            "total_return": rep.total_return, "annualized_return": rep.annualized_return,
+            "sharpe": rep.sharpe_ratio, "max_drawdown": rep.max_drawdown,
+            "calmar": rep.calmar_ratio, "win_rate": rep.win_rate,
+            "profit_factor": rep.profit_factor, "exit_mix": exit_mix(r),
+            "test_start": str(r.test_start.date()), "test_end": str(r.test_end.date()),
             "per_asset": r.per_asset,
         }
-        r.equity.to_csv(out_dir / f"equity_{m}.csv", header=["equity"])
+        r.equity.to_csv(out_dir / f"equity_{m}{tag}.csv", header=["equity"])
     if combined_report is not None:
         summary["combined"] = {
             "total_return": combined_report.total_return,
@@ -219,9 +231,10 @@ def main():
             "profit_factor": combined_report.profit_factor,
             "n_trades": combined_report.n_trades,
         }
-    with open(out_dir / "portfolio_backtest.json", "w") as f:
+    out_json = out_dir / f"portfolio_backtest{tag}.json"
+    with open(out_json, "w") as f:
         json.dump(summary, f, indent=2, default=str)
-    print(f"\nSaved backtest summary to {out_dir / 'portfolio_backtest.json'}", flush=True)
+    print(f"\nSaved backtest summary to {out_json}", flush=True)
 
 
 if __name__ == "__main__":

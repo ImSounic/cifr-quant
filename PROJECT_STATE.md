@@ -206,10 +206,40 @@ Local dev/inference/backtest runs on the dev machine; all training/calibration r
 1. ✅ **Fetch multi-asset data** — 15 crypto (Binance) + 7 commodity (TwelveData/yfinance) done
 2. ✅ **Create BTC v2 config + train** — seed=137, val_loss=2.6672, complete
 3. 🔄 **CQR calibration** — Job 510442 (June 8) **TIMED OUT** at 12h with empty `{}` (crypto leg too heavy + results only written at end). Script now saves per-asset incrementally and resumes. **Run order**: `sbatch slurm/cqr_calibrate_commodity.sh` (fast), then `sbatch slurm/cqr_calibrate_crypto.sh` (resubmit to resume if it hits 12h). Accumulates in `results/cqr/cqr_calibrations.json`.
-4. ⏳ **Multi-asset walk-forward backtest** — Portfolio-level with risk parity sizing, realistic costs per market. Script needed: `scripts/backtest_portfolio.py`
-5. ⏳ **Regime detection** — HMM or volatility classifier, highest-impact addition
+4. ✅ **Multi-asset walk-forward backtest** — `scripts/backtest_portfolio.py` + `src/backtest/portfolio_engine.py` + `src/model/build.py`. Ran June 9 (job 511139). **Results below.**
+5. ⏳ **Regime detection + strategy redesign** — HIGHEST IMPACT. Backtest proved the current single directional strategy only works in trends. See "Strategy Roadmap" below.
 6. ⏳ **LLM strategy layer** — Generate and evaluate strategy code
 7. ⏳ **Final test set evaluation** — Touched exactly ONCE
+
+---
+
+## Backtest Results (June 9, 2026 — job 511139)
+
+90-day walk-forward (2026-03 → 2026-06), $100k split 50/50, long & short, CQR-gated, batched MC paths. **Ran clean, full coverage, MATIC correctly excluded (data ends 2024).**
+
+| Market | Return | Sharpe | Calmar | Max DD | Win% | PF | Trades |
+|--------|--------|--------|--------|--------|------|----|--------|
+| Crypto (15m) | **−23.4%** | **−3.28** | −2.46 | −26.9% | 46.6% | 0.81 | 2358 |
+| Commodity (4h) | **+16.0%** | **+4.36** | 16.5 | −5.0% | 51.7% | 1.52 | 331 |
+| **Combined** | **−5.1%** | **−1.20** | −1.50 | −12.6% | 47.3% | 0.91 | 2689 |
+
+**Verdict:** Crypto is a decisive loser (double-negative: <50% win rate AND avg loss > avg win; likely tripped the 25% DD halt). Commodity looks excellent **but is unverified** — almost certainly trend-regime luck (energy trended hard: Crude +$2.5k, Brent +$3.1k) on a single window + small sample; Sharpe 4.36 is not believable as a sustained number. Same engine + same CQR on both markets → the asymmetry is **regime/market-structure driven, not a code bug**.
+
+### Strategy we ran (the ONLY one so far)
+Single **probabilistic-directional** strategy: ensemble of 30 Kronos MC paths → majority vote = direction + confidence; gate at conf ≥ 0.55 (too weak, ~16/30); SL/TP = CQR-widened q05/q95 band; inverse-interval-width risk parity (10% cap); intrabar SL/TP else timeout. Always-in when confident, symmetric long/short, single horizon.
+
+---
+
+## Strategy Roadmap (research-driven, June 9 2026)
+
+Backtest + literature (López de Prado, regime-filter and vol-targeting research) point to four high-leverage changes. **Build as a pluggable strategy interface so we can backtest many and compare — don't hardcode one.**
+
+1. **Regime filter (biggest lever).** Trend systems fail in ranges; MR fails in trends — exactly our crypto-vs-commodity split. Add Hurst exponent / ADX / realized-vol classifier per asset per rebalance. Only allow directional/momentum trades in trending regimes; switch to mean-reversion (or stand aside) in chop. This alone likely fixes crypto's bleed.
+2. **Meta-labeling (López de Prado).** Keep Kronos as the *primary* (direction) model; train a secondary binary classifier (RF/GBM on vol, momentum, autocorr, RSI, spread, confidence) that decides **trade vs skip**. Documented lift: precision/accuracy up, false positives down — directly targets our 46.6% crypto win rate. Replaces the naive 0.55 confidence gate.
+3. **Volatility-targeted stops & sizing.** Replace static CQR-band SL/TP with **ATR-based stops (1.5–2× ATR)** — research shows ~35% fewer premature stop-outs vs flat rules. Size to a **volatility target** (and/or fractional/half-Kelly using the model's own win-rate & payoff estimate), not just inverse interval width. "Vol is more predictable than direction" — lean on it.
+4. **Strategy library to A/B test.** Candidates to implement behind one interface and run through `portfolio_engine`: (a) directional-momentum [current], (b) mean-reversion on the CQR band (fade q05/q95 touches), (c) breakout/trend-following gated by regime, (d) market-neutral long-top / short-bottom cross-sectional rank by expected return, (e) meta-labeled version of each. Compare on Sharpe, deflated-Sharpe, trade count, exit mix.
+
+**Caveats to enforce next:** multi-window walk-forward (not one 90-day window), deflated Sharpe / multiple-testing haircut, and a flat/non-trending validation window to test the commodity regime-luck hypothesis before trusting +16%.
 
 ---
 
