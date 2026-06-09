@@ -230,6 +230,33 @@ Single **probabilistic-directional** strategy: ensemble of 30 Kronos MC paths �
 
 ---
 
+## FORECAST SKILL DIAGNOSTIC (June 9 2026) — pivotal finding
+
+Decoupled the forecaster from the strategy (`scripts/forecast_skill.py`, CPU off
+cache). **At the tested horizons the Kronos ensemble has NO statistically
+significant directional edge:**
+- Crypto (n=2516): hit 50.8% (SE ~1.0% → 0.8σ, noise); pooled IC +0.004 (noise
+  floor ~0.020). Mean signed edge NEGATIVE (−0.019%) pre-cost.
+- Commodity (n=384): hit 50.3%; pooled IC −0.022 (noise floor ~0.051).
+- **Confidence is degenerate**: 82% of crypto forecasts pin at >0.80 confidence,
+  and that bucket hits 50.7% (coinflip). MC-path agreement carries no info.
+- **Commodity +14% backtest was BETA, not alpha**: hit 50.3% (coinflip) but mean
+  signed edge +0.14% → money came from big asymmetric moves in a trending energy
+  quarter, NOT from forecasting skill. Will not survive a flat/reversing window.
+
+**ATR sweep corroborated** (atr_10: RR 1.0, win 48.9% = sub-coinflip): no exit
+scheme rescues a coinflip signal. directional_atr crypto −26%, commodity fell
++14%→−5% (tight stops cut trend winners).
+
+**Untested decisive variable = HORIZON.** All skill numbers are the 48-bar
+(crypto) / 6-bar (commodity) ENDPOINT. Skill usually lives at SHORT horizons and
+decays. `scripts/horizon_skill.py` (GPU, slurm/horizon_skill.sh) measures IC +
+hit at every step h=1..pred_len. **This decides the project**: if short-horizon
+IC >~0.03 and rising toward h=1 → pivot to short-horizon trading (rebuild cache
+with small pred_len). If flat ~0 at every horizon → model has no extractable
+directional edge on this data; reconsider approach (features, different signal,
+or accept it doesn't work).
+
 ## Strategy A/B Sweep #1 (June 9 2026, off forecast cache)
 
 Refactor verified faithful: baseline reproduced crypto −23.7% / commodity +14.1%.
