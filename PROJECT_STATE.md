@@ -230,6 +230,33 @@ Single **probabilistic-directional** strategy: ensemble of 30 Kronos MC paths �
 
 ---
 
+## Strategy A/B Sweep #1 (June 9 2026, off forecast cache)
+
+Refactor verified faithful: baseline reproduced crypto −23.7% / commodity +14.1%.
+Then swept 4 strategies CPU-only off `results/forecasts/` (instant, no GPU):
+
+| Strategy | Crypto | Commodity | Crypto exit mix (tp/sl/timeout) |
+|----------|--------|-----------|---------------------------------|
+| directional (baseline) | −23.7% | **+14.1%** | 0 / 31 / 2341 |
+| regime_gated_trend strict | −2.1% (36 tr) | **0 trades** | 0 / 0 / 36 |
+| regime_gated_trend relaxed | −5.8% (108 tr) | **0 trades** | 0 / 0 / 108 |
+| mean_reversion (ATR exits) | −6.2% | +1.8% (Sh 1.20) | **106 / 195 / 25** |
+
+**Two hard findings:**
+1. **CQR band is INERT as SL/TP** — 0 take-profits in 2372 crypto trades; every
+   trade rides 12h to timeout. The band is calibrated for distributional
+   coverage, far too wide to trigger intrabar. Directional = pure horizon bet.
+2. **Hurst+ADX regime gating is a NET NEGATIVE** — it makes 0 commodity trades
+   (kills the only profitable book) because Hurst never labels trending energy
+   as "trend." The signed-off composite is empirically wrong for these markets.
+   ADX-only or vol-only gating may still be worth a look; Hurst is the problem.
+3. **ATR exits WORK** — mean_reversion's ATR stops produced real tp/sl fills
+   (106/195/25). Direction was wrong for crypto, but exits fired. → Phase C.
+
+**Next experiment (Phase C, building):** `directional_atr` = winning direction
+(momentum) + working exits (ATR TP/SL, RR 1.5) — the untested winning-direction
++ working-exits cell. Knobs: `--stop-atr-mult`, `--tp-atr-mult`.
+
 ## Strategy Roadmap (research-driven, June 9 2026)
 
 Backtest + literature (López de Prado, regime-filter and vol-targeting research) point to four high-leverage changes. **Build as a pluggable strategy interface so we can backtest many and compare — don't hardcode one.**

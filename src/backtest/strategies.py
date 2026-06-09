@@ -58,6 +58,49 @@ class DirectionalMomentum(Strategy):
         )
 
 
+class DirectionalMomentumATR(DirectionalMomentum):
+    """Same direction signal + confidence gate as DirectionalMomentum, but with
+    TRADEABLE ATR-based exits instead of the inert CQR band.
+
+    The sweep showed the CQR-widened band is far too wide to ever trigger
+    intrabar (crypto: 0 take-profits in 2372 trades), so directional trades just
+    ride to timeout. Here:
+      stop   = entry -/+ stop_atr_mult * ATR   (against the trade)
+      target = entry +/- tp_atr_mult   * ATR   (toward the trade)
+    Default RR = tp/stop = 1.5. Conviction still = 1/CQR-width so sizing matches
+    the baseline (isolates the exit change).
+    """
+    name = "directional_atr"
+
+    def __init__(self, min_confidence: float = 0.55, min_width: float = 1e-4,
+                 stop_atr_mult: float = 2.0, tp_atr_mult: float = 3.0,
+                 atr_period: int = 14):
+        super().__init__(min_confidence=min_confidence, min_width=min_width)
+        self.stop_atr_mult = stop_atr_mult
+        self.tp_atr_mult = tp_atr_mult
+        self.atr_period = atr_period
+
+    def _decide_one(self, d: AssetDecision) -> Optional[TradeIntent]:
+        intent = super()._decide_one(d)   # direction + confidence gate + sizing conviction
+        if intent is None:
+            return None
+        atr_v = _atr(d.context_df, period=self.atr_period)
+        if atr_v <= 0:
+            return None
+        entry = intent.entry_ref
+        if intent.direction == "long":
+            stop = entry - self.stop_atr_mult * atr_v
+            target = entry + self.tp_atr_mult * atr_v
+        else:
+            stop = entry + self.stop_atr_mult * atr_v
+            target = entry - self.tp_atr_mult * atr_v
+        intent.stop = stop
+        intent.target = target
+        intent.meta["strategy"] = self.name
+        intent.meta["atr"] = atr_v
+        return intent
+
+
 class RegimeGatedTrend(DirectionalMomentum):
     """DirectionalMomentum that only fires in a TREND regime (and, by default,
     only when the forecast direction agrees with the trend's direction). Stands

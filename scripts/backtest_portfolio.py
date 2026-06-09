@@ -27,7 +27,8 @@ from configs.base_config import DATA_RAW_DIR, RESULTS_DIR
 from src.backtest.costs import COST_MODELS
 from src.backtest.metrics import evaluate_trades
 from src.backtest.portfolio_engine import run_market_backtest
-from src.backtest.strategies import DirectionalMomentum, RegimeGatedTrend, MeanReversion
+from src.backtest.strategies import (DirectionalMomentum, DirectionalMomentumATR,
+                                     RegimeGatedTrend, MeanReversion)
 from src.backtest.sizing import InverseWidthRiskParity, EqualWeight
 from src.model.forecast_cache import load_forecast_cache
 from src.regime.classifier import RegimeClassifier
@@ -42,16 +43,20 @@ COMMODITY_KEY_TO_FILE = {
 REGIME_AWARE = {"regime_gated_trend", "mean_reversion"}
 
 
-def build_strategy(name, min_confidence):
+def build_strategy(name, min_confidence, stop_atr_mult=2.0, tp_atr_mult=3.0):
     """Return (strategy, needs_regime_classifier)."""
     if name == "directional_momentum":
         return DirectionalMomentum(min_confidence=min_confidence), False
+    if name == "directional_atr":
+        return DirectionalMomentumATR(
+            min_confidence=min_confidence,
+            stop_atr_mult=stop_atr_mult, tp_atr_mult=tp_atr_mult), False
     if name == "regime_gated_trend":
         return RegimeGatedTrend(min_confidence=min_confidence), True
     if name == "mean_reversion":
         return MeanReversion(), True
-    raise ValueError(f"Unknown strategy '{name}'. Available: "
-                     "directional_momentum, regime_gated_trend, mean_reversion")
+    raise ValueError(f"Unknown strategy '{name}'. Available: directional_momentum, "
+                     "directional_atr, regime_gated_trend, mean_reversion")
 
 
 def build_sizer(name, max_position_pct):
@@ -146,6 +151,9 @@ def main():
     # drift, so the strict 0.55 default may need lowering to let trends through).
     ap.add_argument("--hurst-trend", type=float, default=0.55)
     ap.add_argument("--adx-trend", type=float, default=25.0)
+    # ATR-exit knobs (directional_atr): tp/stop multiples of ATR. RR = tp/stop.
+    ap.add_argument("--stop-atr-mult", type=float, default=2.0)
+    ap.add_argument("--tp-atr-mult", type=float, default=3.0)
     args = ap.parse_args()
 
     forecasts_dir = RESULTS_DIR / "forecasts"
@@ -176,7 +184,9 @@ def main():
         forecasts = load_forecast_cache(market, forecasts_dir)
         print(f"  Loaded {len(forecasts)} cached forecasts for {market}", flush=True)
 
-        strategy, needs_regime = build_strategy(args.strategy, args.min_confidence)
+        strategy, needs_regime = build_strategy(
+            args.strategy, args.min_confidence,
+            stop_atr_mult=args.stop_atr_mult, tp_atr_mult=args.tp_atr_mult)
         sizer = build_sizer(args.sizer, args.max_position_pct)
         regime_clf = (RegimeClassifier(hurst_trend=args.hurst_trend, adx_trend=args.adx_trend)
                       if needs_regime else None)
