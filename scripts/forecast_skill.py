@@ -69,11 +69,41 @@ def collect(market, dfs, pred_len, forecasts, lookback=512):
         else:
             hit = realised_ret < 0
             signed_edge = -realised_ret
-        rows.append(dict(symbol=sym, confidence=float(fb.confidence),
+        rows.append(dict(symbol=sym, timestamp=pd.Timestamp(t),
+                         confidence=float(fb.confidence),
                          pred_ret=pred_ret, pred_ret_mean=pred_ret_mean,
                          realised_ret=realised_ret, hit=bool(hit),
                          signed_edge=signed_edge))
     return pd.DataFrame(rows)
+
+
+def cross_sectional_ic(df, min_assets=3):
+    """Rank IC: at each rebalance timestamp, rank-correlate predicted vs realised
+    returns ACROSS assets. This measures whether the model can pick relative
+    winners/losers (the basis of market-neutral) even if it can't call absolute
+    direction. Reports mean IC, its t-stat, the information ratio, and hit rate.
+    """
+    ics = []
+    for _, g in df.groupby("timestamp"):
+        if len(g) >= min_assets:
+            ic = _spearman(g["pred_ret"].to_numpy(), g["realised_ret"].to_numpy())
+            if np.isfinite(ic):
+                ics.append(ic)
+    if len(ics) < 5:
+        print("  Cross-sectional IC: too few periods", flush=True)
+        return
+    ics = np.asarray(ics)
+    mean_ic = ics.mean()
+    std_ic = ics.std(ddof=1)
+    n = len(ics)
+    tstat = mean_ic / (std_ic / np.sqrt(n)) if std_ic > 0 else float("nan")
+    ir = (mean_ic / std_ic) if std_ic > 0 else float("nan")   # per-period IR
+    print(f"\n  CROSS-SECTIONAL rank IC (can it pick winners vs losers?):", flush=True)
+    print(f"    periods={n}  mean IC={mean_ic:+.4f}  std={std_ic:.4f}  "
+          f"t-stat={tstat:+.2f}  IR/period={ir:+.3f}  IC>0 in {np.mean(ics>0):.0%} of periods",
+          flush=True)
+    print(f"    (|t-stat| > ~2 => statistically real; mean IC > ~0.03 => tradeable)",
+          flush=True)
 
 
 def report(market, df):
@@ -90,6 +120,8 @@ def report(market, df):
     print(f"  Pooled IC (mean pred):    {ic_mean:+.4f}", flush=True)
     print(f"  Directional hit rate:     {hit:.1%}   (50% = no skill)", flush=True)
     print(f"  Mean signed edge/fcast:   {edge:+.4%}   (pre-cost ceiling)", flush=True)
+
+    cross_sectional_ic(df)
 
     print("\n  Hit rate by confidence bucket (does confidence stratify?):", flush=True)
     bins = [0.50, 0.55, 0.60, 0.65, 0.70, 0.80, 1.01]
