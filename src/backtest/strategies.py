@@ -12,6 +12,7 @@ from typing import Optional
 import numpy as np
 
 from src.backtest.strategy_api import AssetDecision, Strategy, TradeIntent
+from src.regime.indicators import atr as _atr
 
 
 class DirectionalMomentum(Strategy):
@@ -54,4 +55,100 @@ class DirectionalMomentum(Strategy):
             target=target,
             conviction=1.0 / max(width, self.min_width),
             meta={"strategy": self.name, "confidence": f.confidence, "width": width},
+        )
+
+
+class RegimeGatedTrend(DirectionalMomentum):
+    """DirectionalMomentum that only fires in a TREND regime (and, by default,
+    only when the forecast direction agrees with the trend's direction). Stands
+    aside in RANGE / NEUTRAL and (optionally) in HIGH-vol windows.
+
+    This is the direct test of "does regime gating fix crypto?" — same signal,
+    same SL/TP, just refused outside trends.
+    """
+    name = "regime_gated_trend"
+
+    def __init__(self, min_confidence: float = 0.55, min_width: float = 1e-4,
+                 require_trend_alignment: bool = True, avoid_high_vol: bool = True):
+        super().__init__(min_confidence=min_confidence, min_width=min_width)
+        self.require_trend_alignment = require_trend_alignment
+        self.avoid_high_vol = avoid_high_vol
+
+    def _decide_one(self, d: AssetDecision) -> Optional[TradeIntent]:
+        reg = d.regime
+        if reg is None or not reg.is_trend:
+            return None
+        if self.avoid_high_vol and reg.vol_state == "HIGH":
+            return None
+        intent = super()._decide_one(d)
+        if intent is None:
+            return None
+        if self.require_trend_alignment:
+            want = "long" if reg.trend_state == "TREND_UP" else "short"
+            if intent.direction != want:
+                return None
+        intent.meta["regime"] = reg.trend_state
+        intent.meta["strategy"] = self.name
+        return intent
+
+
+class MeanReversion(Strategy):
+    """Fade extension from the lookback mean; revert toward it. Designed for
+    RANGE regimes (the opposite hypothesis to momentum).
+
+    Entry when |z| = |(price - MA) / std| exceeds `entry_z`:
+      z > 0 (extended up)  -> short, target = MA
+      z < 0 (extended down)-> long,  target = MA
+    Stop = entry +/- `stop_atr_mult` * ATR (against the trade). Conviction = |z|.
+    """
+    name = "mean_reversion"
+
+    def __init__(self, ma_window: int = 96, entry_z: float = 1.5,
+                 stop_atr_mult: float = 2.0, atr_period: int = 14,
+                 only_in_range: bool = True, avoid_high_vol: bool = True):
+        self.ma_window = ma_window
+        self.entry_z = entry_z
+        self.stop_atr_mult = stop_atr_mult
+        self.atr_period = atr_period
+        self.only_in_range = only_in_range
+        self.avoid_high_vol = avoid_high_vol
+
+    def _decide_one(self, d: AssetDecision) -> Optional[TradeIntent]:
+        reg = d.regime
+        if self.only_in_range and (reg is None or not reg.is_range):
+            return None
+        if self.avoid_high_vol and reg is not None and reg.vol_state == "HIGH":
+            return None
+
+        ctx = d.context_df
+        close = ctx["close"].to_numpy(dtype=float)
+        if len(close) < self.ma_window + 2:
+            return None
+        window = close[-self.ma_window:]
+        ma = float(window.mean())
+        sd = float(window.std())
+        entry = float(d.forecast.entry_price)
+        if sd <= 0 or entry <= 0:
+            return None
+
+        z = (entry - ma) / sd
+        if abs(z) < self.entry_z:
+            return None
+
+        atr_v = _atr(ctx, period=self.atr_period)
+        if atr_v <= 0:
+            return None
+
+        if z > 0:  # extended above mean -> short, revert down to MA
+            direction, target = "short", ma
+            stop = entry + self.stop_atr_mult * atr_v
+        else:      # extended below mean -> long, revert up to MA
+            direction, target = "long", ma
+            stop = entry - self.stop_atr_mult * atr_v
+
+        return TradeIntent(
+            symbol=d.symbol, direction=direction, entry_ref=entry,
+            stop=stop, target=target, conviction=abs(z),
+            meta={"strategy": self.name, "z": z, "atr": atr_v,
+                  "regime": (reg.trend_state if reg else "NA")},
         )

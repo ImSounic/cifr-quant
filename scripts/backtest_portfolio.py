@@ -27,9 +27,10 @@ from configs.base_config import DATA_RAW_DIR, RESULTS_DIR
 from src.backtest.costs import COST_MODELS
 from src.backtest.metrics import evaluate_trades
 from src.backtest.portfolio_engine import run_market_backtest
-from src.backtest.strategies import DirectionalMomentum
+from src.backtest.strategies import DirectionalMomentum, RegimeGatedTrend, MeanReversion
 from src.backtest.sizing import InverseWidthRiskParity, EqualWeight
 from src.model.forecast_cache import load_forecast_cache
+from src.regime.classifier import RegimeClassifier
 
 COMMODITY_KEY_TO_FILE = {
     "XAU/USD": "xau_usd", "XAG/USD": "xag_usd", "XPT/USD": "xpt_usd",
@@ -38,11 +39,19 @@ COMMODITY_KEY_TO_FILE = {
 }
 
 
+REGIME_AWARE = {"regime_gated_trend", "mean_reversion"}
+
+
 def build_strategy(name, min_confidence):
+    """Return (strategy, needs_regime_classifier)."""
     if name == "directional_momentum":
-        return DirectionalMomentum(min_confidence=min_confidence)
-    raise ValueError(f"Unknown strategy '{name}'. Available: directional_momentum "
-                     "(more land in Phase B: mean_reversion, regime_gated_trend, ...)")
+        return DirectionalMomentum(min_confidence=min_confidence), False
+    if name == "regime_gated_trend":
+        return RegimeGatedTrend(min_confidence=min_confidence), True
+    if name == "mean_reversion":
+        return MeanReversion(), True
+    raise ValueError(f"Unknown strategy '{name}'. Available: "
+                     "directional_momentum, regime_gated_trend, mean_reversion")
 
 
 def build_sizer(name, max_position_pct):
@@ -133,6 +142,10 @@ def main():
     ap.add_argument("--test-days", type=int, default=90)
     ap.add_argument("--step-size", type=int, default=None)
     ap.add_argument("--tag", default=None, help="Suffix for output files (for A/B runs)")
+    # Regime thresholds (tunable for the A/B sweep; Hurst is conservative on weak
+    # drift, so the strict 0.55 default may need lowering to let trends through).
+    ap.add_argument("--hurst-trend", type=float, default=0.55)
+    ap.add_argument("--adx-trend", type=float, default=25.0)
     args = ap.parse_args()
 
     forecasts_dir = RESULTS_DIR / "forecasts"
@@ -163,8 +176,13 @@ def main():
         forecasts = load_forecast_cache(market, forecasts_dir)
         print(f"  Loaded {len(forecasts)} cached forecasts for {market}", flush=True)
 
-        strategy = build_strategy(args.strategy, args.min_confidence)
+        strategy, needs_regime = build_strategy(args.strategy, args.min_confidence)
         sizer = build_sizer(args.sizer, args.max_position_pct)
+        regime_clf = (RegimeClassifier(hurst_trend=args.hurst_trend, adx_trend=args.adx_trend)
+                      if needs_regime else None)
+        if needs_regime:
+            print(f"  Regime classifier: Hurst+ADX composite "
+                  f"(hurst_trend={args.hurst_trend}, adx_trend={args.adx_trend})", flush=True)
 
         res = run_market_backtest(
             market=market,
@@ -172,6 +190,7 @@ def main():
             cost_model=COST_MODELS[market],
             forecasts=forecasts, corrections=corrections,
             strategy=strategy, sizer=sizer,
+            regime_classifier=regime_clf,
             step_size=args.step_size, test_days=args.test_days,
             initial_capital=per_market_capital,
             max_drawdown_halt=args.max_drawdown_halt,
