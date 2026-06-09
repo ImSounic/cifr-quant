@@ -230,6 +230,29 @@ Single **probabilistic-directional** strategy: ensemble of 30 Kronos MC paths �
 
 ---
 
+## VERDICT (June 9-10 2026): no directional alpha — pivot to volatility
+
+Comprehensive skill testing (forecast_skill.py, horizon_skill.py) is conclusive:
+the Kronos OHLCV ensemble has **NO statistically significant price-direction
+alpha** on either market, time-series OR cross-sectional, at any horizon:
+- Crypto directional hit 50.8% (NS); IC ~0 across all 48 horizons; **cross-
+  sectional rank IC mean +0.019, t-stat +0.76 (NOT significant)**.
+- Commodity directional 50.3%; cross-sectional t-stat −0.01; +14% backtest = beta.
+- Confidence measure degenerate (82% pinned >0.80, that bucket = coinflip).
+
+This is a real, rigorous negative result. STOP iterating directional strategies.
+
+**PIVOT: predict volatility, not direction.** Vol clusters and is forecastable
+(the robust stylized fact). The cache already holds a vol forecast — the quantile
+spread (q95-q05) — that we only ever (mis)used as a stop level.
+`scripts/vol_skill.py` tests whether predicted spread rank-correlates with
+realised vol, vs a naive context-vol persistence baseline. CPU off the cache.
+- If pred_width IC >> baseline and significant → real skill at RISK forecasting →
+  build vol-targeting / risk overlay / vol products around it.
+- If it only matches naive persistence → model adds nothing; reconsider inputs
+  (funding/order-flow/cross-asset) or treat the whole thing as a documented
+  negative result + reusable infra (cache, pluggable engine, diagnostics, CQR).
+
 ## FORECAST SKILL DIAGNOSTIC (June 9 2026) — pivotal finding
 
 Decoupled the forecaster from the strategy (`scripts/forecast_skill.py`, CPU off
