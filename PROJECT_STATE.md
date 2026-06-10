@@ -125,12 +125,23 @@ Finetune Kronos (foundation model for candlesticks) per market → ensemble MC-p
    - ✅ Tail-spread check confirmed the reversal post-mortem: bottom-3-minus-top-3
      spread −0.108%/day pooled, negative EVERY year → middle reverts, tails trend.
      Mirror trade (tail momentum) decayed −0.23%/day (2022) → −0.006% (2026): dead.
-   - ⏳ Remaining queue: time-series momentum (tsmom_skill.py, data on disk),
-     OI-change/squeeze (OI history accumulating since June 10, ~30d available),
-     commodity futures carry (term structure/COT — needs new data source; commodities
-     DEPRIORITIZED not scrapped — spot candles carry no term structure), Phase 3 text.
+   - ❌ **TSMOM** (tsmom_skill.py): equal-notional AND canonical inverse-vol-scaled
+     both fail — best t≈1.6, 2025 negative in every lookback/construction. All-cells-
+     positive grid was suggestive but cells share trades; not 12 confirmations. Closed.
+   - **2C scoreboard: carry ✅ / XS momo ❌ / reversal ❌ / tail-momo ❌ / TSMOM ❌.**
+     1-in-5 hit rate = normal. Remaining queue BLOCKED ON DATA: OI/squeeze (OI history
+     accumulating since June 10, ~30d), commodity futures carry (term structure/COT —
+     needs new data source; commodities DEPRIORITIZED not scrapped — spot candles carry
+     no term structure), Phase 3 text features.
    - NOTE: none of Phase 2 touches Kronos — all CPU statistics over derivs CSVs.
      Complexity must be earned; ML returns only behind validated features.
+4. 🔄 **Phase 4 v1 — SHADOW PAPER TRADING (started June 10)**: `scripts/paper_trade_carry.py`
+   runs the FROZEN carry config live every 8h via cron on the HPC head node (network
+   I/O only). Fetches real funding + marks, accrues real funding on the held book,
+   simulates fills at mark±3bp, persists `results/paper/carry_state.json` +
+   `carry_history.csv`. Measures signal-live consistency vs backtest. Frozen params
+   in the script header — ANY change = new strategy, must re-earn the gate.
+   v2 (later): Binance testnet limit orders to price maker fill risk.
 4. ⏳ **Phase 2D — Portfolio the survivors**: validated signals → pluggable engine (`--strategy` plug-ins) with **vol-targeted sizing** (vol persistence IC 0.61 is free and proven — it's the risk layer, not the alpha).
 5. ⏳ **Phase 3 — LLM as data source** (the v1 vision, pointed the right way): text→features (news/sentiment/events) → same IC diagnostics. NOT a strategy picker.
 6. ⏳ **Phase 4 — Paper trading loop** (Binance testnet) — makes it a firm, generates execution data.
