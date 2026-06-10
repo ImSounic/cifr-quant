@@ -120,15 +120,16 @@ def main():
             line += f"  {np.nanmean(ics):>+8.3f} {t:>+7.2f}"
         print(line, flush=True)
 
-    print("\n  Per-year stability (7d horizon):", flush=True)
-    for lname in LOOKBACKS:
-        s = ic_series[(lname, "7d")]
-        line = f"  {lname:>9s}:"
-        for year, ys in s.groupby(s.index.year):
-            if len(ys) >= 20:
-                t, n = _tstat(ys.to_numpy())
-                line += f"  {year}: {ys.mean():+.3f} (t={t:+.2f})"
-        print(line, flush=True)
+    for hz in ("1d", "7d"):
+        print(f"\n  Per-year stability ({hz} horizon):", flush=True)
+        for lname in LOOKBACKS:
+            s = ic_series[(lname, hz)]
+            line = f"  {lname:>9s}:"
+            for year, ys in s.groupby(s.index.year):
+                if len(ys) >= 20:
+                    t, n = _tstat(ys.to_numpy())
+                    line += f"  {year}: {ys.mean():+.3f} (t={t:+.2f})"
+            print(line, flush=True)
 
     # Decorrelation vs carry signal.
     print("\n  Overlap with the carry book (momentum rank vs 3d-funding rank):", flush=True)
