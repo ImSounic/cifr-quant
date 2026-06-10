@@ -34,6 +34,8 @@ def main():
                     help="Explicit symbols (default: full tier selection)")
     ap.add_argument("--what", choices=["all", "funding", "perp", "oi"], default="all")
     ap.add_argument("--start", default="2022-01-01")
+    ap.add_argument("--exchange", choices=["binanceusdm", "okx"], default="binanceusdm",
+                    help="Venue to fetch from; non-Binance saves to data/raw/derivs_<exchange>/")
     args = ap.parse_args()
 
     if args.symbols:
@@ -42,8 +44,10 @@ def main():
         from configs.crypto_universe import get_crypto_configs
         symbols = list(get_crypto_configs(tiers=tuple(args.tiers)).keys())
 
-    out_dir = DATA_RAW_DIR / "derivs"
-    print(f"Fetching derivs data for {len(symbols)} symbols -> {out_dir}\n", flush=True)
+    out_dir = (DATA_RAW_DIR / "derivs" if args.exchange == "binanceusdm"
+               else DATA_RAW_DIR / f"derivs_{args.exchange}")
+    print(f"Fetching derivs data ({args.exchange}) for {len(symbols)} symbols -> {out_dir}\n",
+          flush=True)
 
     failures = []
     for sym in symbols:
@@ -53,17 +57,19 @@ def main():
         jobs = []
         if args.what in ("all", "funding"):
             jobs.append(("funding", lambda: fetch_funding_history(
-                sym, start_date=args.start, output_path=out_dir / f"{safe}_funding.csv"),
+                sym, start_date=args.start, output_path=out_dir / f"{safe}_funding.csv",
+                exchange_id=args.exchange),
                 out_dir / f"{safe}_funding.csv", False))
         if args.what in ("all", "perp"):
             jobs.append(("perp_1h", lambda: fetch_perp_ohlcv(
                 sym, timeframe="1h", start_date=args.start,
-                output_path=out_dir / f"{safe}_perp_1h.csv"),
+                output_path=out_dir / f"{safe}_perp_1h.csv", exchange_id=args.exchange),
                 out_dir / f"{safe}_perp_1h.csv", False))
         if args.what in ("all", "oi"):
             # OI always refetches (appends new history; Binance only keeps 30d)
             jobs.append(("oi_1h", lambda: fetch_oi_history(
-                sym, timeframe="1h", output_path=out_dir / f"{safe}_oi_1h.csv"),
+                sym, timeframe="1h", output_path=out_dir / f"{safe}_oi_1h.csv",
+                exchange_id=args.exchange),
                 out_dir / f"{safe}_oi_1h.csv", True))
 
         for name, fn, path, always in jobs:

@@ -18,8 +18,8 @@ import pandas as pd
 from tqdm import tqdm
 
 
-def _exchange():
-    return ccxt.binanceusdm({"enableRateLimit": True})
+def _exchange(exchange_id: str = "binanceusdm"):
+    return getattr(ccxt, exchange_id)({"enableRateLimit": True})
 
 
 def _perp_symbol(spot_symbol: str) -> str:
@@ -31,9 +31,10 @@ def fetch_funding_history(
     spot_symbol: str,
     start_date: str = "2022-01-01",
     output_path: Path | None = None,
+    exchange_id: str = "binanceusdm",
 ) -> pd.DataFrame:
     """Full funding-rate history (one row per 8h funding event)."""
-    ex = _exchange()
+    ex = _exchange(exchange_id)
     symbol = _perp_symbol(spot_symbol)
     since = ex.parse8601(f"{start_date}T00:00:00Z")
     now = ex.milliseconds()
@@ -69,9 +70,10 @@ def fetch_perp_ohlcv(
     timeframe: str = "1h",
     start_date: str = "2022-01-01",
     output_path: Path | None = None,
+    exchange_id: str = "binanceusdm",
 ) -> pd.DataFrame:
     """Perp klines (same schema as spot fetcher: timestamps OHLCV + amount)."""
-    ex = _exchange()
+    ex = _exchange(exchange_id)
     symbol = _perp_symbol(spot_symbol)
     since = ex.parse8601(f"{start_date}T00:00:00Z")
     now = ex.milliseconds()
@@ -103,11 +105,12 @@ def fetch_oi_history(
     spot_symbol: str,
     timeframe: str = "1h",
     output_path: Path | None = None,
+    exchange_id: str = "binanceusdm",
 ) -> pd.DataFrame:
     """Open-interest history. Binance only serves ~30 days — fetch all of it.
     Re-running APPENDS to an existing file (dedup on timestamp) so history
     accumulates if we run this periodically."""
-    ex = _exchange()
+    ex = _exchange(exchange_id)
     symbol = _perp_symbol(spot_symbol)
     since = ex.milliseconds() - 30 * 24 * 3600 * 1000  # 30d back (API limit)
 

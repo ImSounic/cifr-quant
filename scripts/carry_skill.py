@@ -60,10 +60,10 @@ def _tstat(x):
     return float(x.mean() / (x.std(ddof=1) / np.sqrt(len(x)))), len(x)
 
 
-def load_asset(sym):
+def load_asset(sym, derivs_dir=DERIVS_DIR):
     safe = sym.replace("/", "_").lower()
-    f_path = DERIVS_DIR / f"{safe}_funding.csv"
-    p_path = DERIVS_DIR / f"{safe}_perp_1h.csv"
+    f_path = derivs_dir / f"{safe}_funding.csv"
+    p_path = derivs_dir / f"{safe}_perp_1h.csv"
     if not (f_path.exists() and p_path.exists()):
         return None
     fund = pd.read_csv(f_path)
@@ -112,12 +112,20 @@ def build_events(fund, perp):
 
 
 def main():
+    import argparse
+    ap = argparse.ArgumentParser()
+    ap.add_argument("--exchange", choices=["binanceusdm", "okx"], default="binanceusdm",
+                    help="Which venue's funding/perp data to diagnose")
+    args = ap.parse_args()
+    derivs_dir = (DERIVS_DIR if args.exchange == "binanceusdm"
+                  else DATA_RAW_DIR / f"derivs_{args.exchange}")
+
     from configs.crypto_universe import get_crypto_configs
     symbols = list(get_crypto_configs(tiers=(1, 2)).keys())
 
     per_asset = {}
     for sym in symbols:
-        loaded = load_asset(sym)
+        loaded = load_asset(sym, derivs_dir)
         if loaded is None:
             print(f"  SKIP {sym}: no derivs data", flush=True)
             continue
@@ -132,7 +140,8 @@ def main():
         print("No data — run scripts/fetch_derivs.py first.")
         return
 
-    print(f"\n{'='*72}\n  FUNDING-CARRY SKILL  ({len(per_asset)} assets)\n{'='*72}", flush=True)
+    print(f"\n{'='*72}\n  FUNDING-CARRY SKILL  [{args.exchange}]  ({len(per_asset)} assets)\n{'='*72}",
+          flush=True)
 
     # ---------- 1. Time-series predictive IC per asset ----------
     print("\n  Per-asset time-series IC (funding vs fwd return; hypothesis: NEGATIVE)",
