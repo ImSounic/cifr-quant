@@ -93,6 +93,44 @@ def main():
             line += f"  {np.nanmean(rets):>+9.4%} {t:>+7.2f}"
         print(line, flush=True)
 
+    # Canonical construction (declared follow-up): inverse-vol-scaled signs —
+    # the actual MOP/managed-futures TSMOM. Equal-notional lets DOGE/NEAR vol
+    # dominate the book; equal-RISK is what the literature documents.
+    print("\n  CANONICAL vol-scaled TSMOM (sign × 1/σ_30d, normalized):", flush=True)
+    daily_ret = close.pct_change()
+    vol30 = daily_ret.rolling(30).std()
+    print(f"  {'lookback':>9s}" + "".join(
+        f"  {h+'/d':>9s} {h+'_t':>7s}" for h in HORIZONS), flush=True)
+    vs_series = {}
+    for lname, lb in LOOKBACKS.items():
+        sign = np.sign(close / close.shift(lb) - 1.0)
+        w_raw = sign / vol30
+        line = f"  {lname:>9s}"
+        for h, d in HORIZONS.items():
+            rets, dates = [], []
+            for i in range(max(lb, 30), len(close) - d, d):
+                w_row = w_raw.iloc[i]
+                r_row = fwd[h].iloc[i]
+                m = w_row.notna() & r_row.notna() & np.isfinite(w_row)
+                if m.sum() >= 8:
+                    w = w_row[m] / w_row[m].abs().sum()     # gross = 1.0
+                    rets.append(float((w * r_row[m]).sum()) / d)
+                    dates.append(close.index[i])
+            vs_series[(lname, h)] = pd.Series(rets, index=dates)
+            t, n = _tstat(np.asarray(rets))
+            line += f"  {np.nanmean(rets):>+9.4%} {t:>+7.2f}"
+        print(line, flush=True)
+
+    print("\n  Vol-scaled per-year stability (1d horizon):", flush=True)
+    for lname in LOOKBACKS:
+        s = vs_series[(lname, "1d")]
+        line = f"  {lname:>9s}:"
+        for year, ys in s.groupby(s.index.year):
+            if len(ys) >= 30:
+                t, n = _tstat(ys.to_numpy())
+                line += f"  {year}: {ys.mean():+.3%} (t={t:+.2f})"
+        print(line, flush=True)
+
     # Baseline: passive equal-weight long (TSMOM must beat this to be timing alpha).
     print("\n  Baseline — passive equal-weight LONG (per-day):", flush=True)
     bh = []
