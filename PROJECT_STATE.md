@@ -139,6 +139,17 @@ Finetuned checkpoints (BTC v1/v2, XAU v1/v2); batched MC path generation (`src/m
 - **OKX demo live** (04:31 UTC): the firm's first real orders — 5 post-only limits, 0 rejects, all contract-size math verified. 4 of 5 filled within the hour. Quirk: OKX demo lists no UNI perp → book occasionally 3-long/2-short (~17% net exposure) — flagged for the venue decision.
 - **OKX validation** (`carry_skill --exchange okx`): the carry edge on OKX's own funding/prices: t=−2.68 over the 3 months their API serves, **13/13 assets agree on sign**, same strength as Binance over the identical window. *Why this mattered*: we trade OKX's funding if we go live there, not Binance's — Raj spotted this gap and the test closed it. OKX = provisionally validated live venue. *Data caveat handled*: OKX's API only serves ~3 months of funding history → fetcher made incremental/appending + weekly cron now archives it ourselves.
 - Current regime note: funding is LOW everywhere right now (Binance 2026 harvest is negative). The cross-sectional design is insensitive to the overall level by construction — this is that design choice earning its keep.
+- **Phase 4.5 DECIDED (June 10): the live venue is OKX.** Hyperliquid validation
+  (carry_skill --exchange hyperliquid) FAILED: on the available window (HL's API
+  caps price history at ~5,000 candles → only Nov 2025–Jun 2026 evaluable),
+  per-asset 8h IC is +0.037 — the WRONG SIGN, positive in 87% of assets — while
+  Binance (t=−2.79) and OKX (t=−2.68) both confirm the edge over the SAME window.
+  Genuine venue difference (likely HL's hourly funding mechanism reverting
+  intra-window + different crowd), not a period effect. *In plain terms*: the
+  same bet that works on Binance/OKX has been backwards on Hyperliquid lately —
+  so we don't trade it there. The HL "momentum" pattern is parked as a
+  scan-discovered observation (zero attention until it earns its own gauntlet).
+  HL data limitation recorded: past price history unretrievable beyond ~5k bars.
 
 ---
 
