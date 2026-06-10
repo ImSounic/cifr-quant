@@ -56,10 +56,12 @@ def main():
 
         jobs = []
         if args.what in ("all", "funding"):
+            # Funding always re-runs: the fetch is incremental (appends from the
+            # file's last timestamp), which ACCUMULATES history on OKX (~3mo API).
             jobs.append(("funding", lambda: fetch_funding_history(
                 sym, start_date=args.start, output_path=out_dir / f"{safe}_funding.csv",
                 exchange_id=args.exchange),
-                out_dir / f"{safe}_funding.csv", False))
+                out_dir / f"{safe}_funding.csv", True))
         if args.what in ("all", "perp"):
             jobs.append(("perp_1h", lambda: fetch_perp_ohlcv(
                 sym, timeframe="1h", start_date=args.start,

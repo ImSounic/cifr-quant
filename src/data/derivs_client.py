@@ -33,11 +33,21 @@ def fetch_funding_history(
     output_path: Path | None = None,
     exchange_id: str = "binanceusdm",
 ) -> pd.DataFrame:
-    """Full funding-rate history (one row per 8h funding event)."""
+    """Funding-rate history (one row per 8h funding event). INCREMENTAL: if the
+    output file exists, fetch only events after its last timestamp and append
+    (dedup). This matters on OKX, whose API serves only ~3 months — periodic
+    re-runs accumulate history that would otherwise be lost."""
     ex = _exchange(exchange_id)
     symbol = _perp_symbol(spot_symbol)
     since = ex.parse8601(f"{start_date}T00:00:00Z")
     now = ex.milliseconds()
+
+    existing = None
+    if output_path is not None and output_path.exists():
+        existing = pd.read_csv(output_path)
+        existing["timestamps"] = pd.to_datetime(existing["timestamps"])
+        if not existing.empty:
+            since = max(since, int(existing["timestamps"].max().timestamp() * 1000) + 1)
 
     rows = []
     with tqdm(desc=f"funding {spot_symbol}") as pbar:
@@ -57,6 +67,8 @@ def fetch_funding_history(
         "timestamps": pd.to_datetime(r["timestamp"], unit="ms"),
         "funding_rate": float(r["fundingRate"]),
     } for r in rows])
+    if existing is not None and not existing.empty:
+        df = pd.concat([existing, df], ignore_index=True)
     if not df.empty:
         df = df.drop_duplicates(subset="timestamps").sort_values("timestamps").reset_index(drop=True)
     if output_path and not df.empty:

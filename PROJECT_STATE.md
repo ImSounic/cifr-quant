@@ -155,6 +155,28 @@ Finetune Kronos (foundation model for candlesticks) per market → ensemble MC-p
    Venue selection = Phase 4.5 decision; note venue funding rates ≠ Binance
    funding rates — re-validate carry on the chosen venue's own funding data
    before going live there.
+   **OKX DEMO LIVE (June 10 04:31 UTC)**: `scripts/okx_demo_trade_carry.py`
+   placed the firm's first real orders — 5 post-only limits on OKX demo
+   (75k fake USDT, 0 rejects, contract-size conversion verified across
+   XRP/DOGE/SOL/LINK/ATOM). Signal = Binance funding (frozen, imported from
+   paper_trade_carry); OKX = execution lab only. Quirk found: **no UNI perp in
+   OKX demo** → book runs 3L/2S (~17% net-long) when UNI is in the short leg —
+   acceptable for fill measurement, relevant to Phase 4.5 venue choice.
+   **Phase 4.5 OKX validation (June 10)**: fetched OKX's own funding (API serves
+   only ~3 months — 278 events) + perp klines (BNB perp empty, MATIC absent → 13
+   assets). carry_skill --exchange okx: **8h XS IC −0.050, t=−2.68; 1d per-asset
+   IC negative in 13/13 assets** — same strength as Binance over the same window
+   (2026: −0.041/−2.79). The carry effect is MARKET-WIDE, not Binance-specific →
+   **OKX provisionally validated as live venue** (full multi-year native
+   validation impossible from API; mitigation: funding fetch is now INCREMENTAL/
+   appending — weekly cron accumulates OKX history going forward). OKX harvest
+   thin (+0.95%/yr) but so is Binance 2026 (−0.95%) — low-funding regime, not a
+   venue gap; the XS book is insensitive to the level by construction.
+   Cron stack (head node, CEST): :05 shadow, :10 OKX demo, :30 hourly heartbeat,
+   weekly Sun 03:00 OKX funding accumulation.
+   Logs: results/paper/{carry,okx_demo}_history.csv. Day-30 graduation review
+   reads all three measurements (shadow PnL consistency, synthetic fill lower
+   bound, OKX real fill rate).
 4. ⏳ **Phase 2D — Portfolio the survivors**: validated signals → pluggable engine (`--strategy` plug-ins) with **vol-targeted sizing** (vol persistence IC 0.61 is free and proven — it's the risk layer, not the alpha).
 5. ⏳ **Phase 3 — LLM as data source** (the v1 vision, pointed the right way): text→features (news/sentiment/events) → same IC diagnostics. NOT a strategy picker.
 6. ⏳ **Phase 4 — Paper trading loop** (Binance testnet) — makes it a firm, generates execution data.
