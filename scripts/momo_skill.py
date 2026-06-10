@@ -131,6 +131,30 @@ def main():
                     line += f"  {year}: {ys.mean():+.3f} (t={t:+.2f})"
             print(line, flush=True)
 
+    # Construction-matched tail check: what a K=3 tails portfolio ACTUALLY trades.
+    # (Lesson from the reversal backtest: rank IC measures the whole cross-section;
+    # a K portfolio trades only the tails, which can behave oppositely.)
+    print("\n  Tail spread check (bottom-3 minus top-3 by 7d trailing ret, 1d fwd):",
+          flush=True)
+    sig7 = signals["7d"]
+    spreads, sdates = [], []
+    for i in range(len(close) - 1):
+        s_row = sig7.iloc[i]
+        r_row = fwd["1d"].iloc[i]
+        m = s_row.notna() & r_row.notna()
+        if m.sum() >= MIN_ASSETS:
+            order = s_row[m].sort_values().index
+            spread = float(r_row[order[:3]].mean() - r_row[order[-3:]].mean())
+            spreads.append(spread); sdates.append(close.index[i])
+    sp = pd.Series(spreads, index=sdates)
+    t, n = _tstat(sp.to_numpy())
+    print(f"    pooled: mean={sp.mean():+.4%}/day  t={t:+.2f}  n={n}  "
+          f"(positive = reversal tradeable in the tails)", flush=True)
+    for year, ys in sp.groupby(sp.index.year):
+        if len(ys) >= 30:
+            t, n = _tstat(ys.to_numpy())
+            print(f"    {year}: mean={ys.mean():+.4%}/day  t={t:+.2f}", flush=True)
+
     # Decorrelation vs carry signal.
     print("\n  Overlap with the carry book (momentum rank vs 3d-funding rank):", flush=True)
     overlaps = []

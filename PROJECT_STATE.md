@@ -28,10 +28,19 @@ CIFR-QUANT is a systematic-trading research project building toward a quant firm
 - Harvest leg: majors yield +5-8% ann. unconditionally BUT regime-dependent
   (+11.6% 2024, negative 2022/2026) → conditional/cross-sectional designs only.
   BNB structurally negative funding (−5.8%/yr, shorts pay) — anomaly, investigate.
-- **Earned backtest built**: `scripts/backtest_carry.py` — XS long-low/short-high
-  funding, dollar-neutral, funding CASHFLOWS in PnL (shorts collect what they
-  predict against — paid twice), costs on turnover only, hysteresis buffer,
-  per-year Sharpe + price-vs-funding decomposition. AWAITING FIRST RUN.
+- **Earned backtest run & iterated (6 configs total, ledger counted). BRICK #1
+  FROZEN: `v2_maker_8h` = K=3, --smooth 9, --exit-band 2, 8h cadence, maker
+  costs (0.03%/side): +9.0%/yr, Sharpe 0.52, dollar-neutral, NET POSITIVE ALL
+  5 YEARS** (2022 +14.9 / 2023 +22.6 / 2024 +1.8 / 2025 +4.1 / 2026 +5.5).
+  Decomposition: price +31% / funding +35% / costs −17% over 4.5y. Turnover
+  0.11 gross/event (smoothing+band hysteresis vs 0.91 naive — naive taker
+  version lost −91% to fees despite +124% gross: implementation matters).
+  Honest read: equity-curve t≈1.1 alone is weak; credibility = diagnostic
+  t=−4.83 + mechanical funding leg + 5/5-year consistency. Deflated for 6
+  trials → true expectation somewhat below Sharpe 0.5. NO MORE CARRY TUNING —
+  next iteration risk is overfitting. Known gaps: maker fill risk (priced only
+  by paper trading), maxDD −30% (fix = portfolio-level vol targeting, not
+  carry tweaks). Results: `results/backtest/carry_backtest_v2_maker_8h.json`.
 
 ---
 
@@ -103,7 +112,19 @@ Finetune Kronos (foundation model for candlesticks) per market → ensemble MC-p
 
 1. ✅ **Phase 2A — Derivatives data layer**: `scripts/fetch_derivs.py` done June 10; 14 assets of funding / perp-1h / OI in `data/raw/derivs/` (HPC).
 2. ✅ **Phase 2B — Carry signal diagnostic**: **GATE PASSED** — 8h XS t=−4.83, negative all 5 years, |t|≥2.2 in 4/5. Earned backtest built (`scripts/backtest_carry.py`), first run pending.
-3. ⏳ **Phase 2C — More signal candidates through the same gauntlet**: OI-change, liquidation cascades, slow (weekly) cross-sectional momentum. Simple models only (rankings, z-scores, GBM at most).
+3. 🔄 **Phase 2C — More signal candidates** (June 10 results so far):
+   - ❌ **XS momentum** (momo_skill.py): FAILED — grid signs incoherent, no cell
+     near significance, year-unstable. Closed without a backtest.
+   - ❌ **Short-term reversal** (7d→1d, found by scan at t=−2.86): passed the
+     marginal gate but backtest price leg lost −105% across ALL years.
+     **LESSON → GAUNTLET UPGRADE: rank IC measures the whole cross-section; a
+     K-portfolio trades the TAILS, which in crypto trend violently (death
+     spirals/pumps) while the middle reverts. Every future diagnostic must
+     include a construction-matched tail-spread test (bottom-K minus top-K
+     forward return) before any backtest is earned.** Added to momo_skill.py.
+   - ⏳ Remaining queue: time-series momentum, OI-change/squeeze (OI history
+     accumulating since June 10, ~30d available), commodity futures carry
+     (term structure/COT — needs new data source), Phase 3 text features.
 4. ⏳ **Phase 2D — Portfolio the survivors**: validated signals → pluggable engine (`--strategy` plug-ins) with **vol-targeted sizing** (vol persistence IC 0.61 is free and proven — it's the risk layer, not the alpha).
 5. ⏳ **Phase 3 — LLM as data source** (the v1 vision, pointed the right way): text→features (news/sentiment/events) → same IC diagnostics. NOT a strategy picker.
 6. ⏳ **Phase 4 — Paper trading loop** (Binance testnet) — makes it a firm, generates execution data.
