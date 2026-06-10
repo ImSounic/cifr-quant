@@ -125,7 +125,19 @@ Finetuned checkpoints (BTC v1/v2, XAU v1/v2); batched MC path generation (`src/m
 
 **Why simple statistics and no ML here**: the carry relationship is nearly linear — a rolling average and a sort capture it fully; a neural net would add overfitting risk and remove interpretability. **Complexity must be earned**: ML returns when there are several validated signals to *combine* (a genuine ML problem); LLMs return when we want features from *text* (a genuinely-LLM problem).
 
-**Remaining candidate queue (blocked on data, not on us)**: open-interest/squeeze signals (OI history accumulating since June 10 — ripe ~end of June); commodity futures carry (needs futures-curve/COT data — commodities deprioritized, NOT scrapped: our spot candles simply don't contain the term-structure information that commodity edges live in); Phase 3 text features.
+**❌ COT positioning (June 10)** — commodities' cheap candidate, killed on 40 years
+of data: spec-crowding percentile mean IC ≈ 0, sign coinflip across 6 commodities,
+the one tempting cell (4w XS t=−2.30) fails multiplicity AND its construction-
+matched spread AND 3-year-bucket stability (sign flips every bucket since 1998).
+Matches modern literature: the simple COT fade was arbitraged flat decades ago.
+*Infrastructure keeps*: `fetch_cot.py` (CFTC API, weekly since 1986, incremental)
++ daily futures prices to 2000 — reusable as features/data for later candidates.
+
+**Remaining candidate queue**: open-interest/squeeze signals (OI history
+accumulating since June 10 — ripe ~end of June); **commodity TERM-STRUCTURE carry**
+(the classic backwardation/contango signal — now the declared next commodity
+candidate; needs stitching yfinance contract chains, ~a day of data engineering —
+deliberate project for the shadow window, not a quick run); Phase 3 text features.
 
 ---
 
