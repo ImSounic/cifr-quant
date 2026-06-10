@@ -1,204 +1,174 @@
 # CIFR-QUANT: Project State
 
-> **Purpose**: Cross-session memory for Claude. Read this file at the start of every new session.
+> **Purpose**: Cross-session memory for Claude AND a plain-language record for Raj.
+> Each section has the technical facts plus **In plain terms** (what it means) and
+> **Why we did it** (the reasoning). Read this file at the start of every session.
 > **Last updated**: June 10, 2026
+
+---
+
+## Glossary (plain English for the terms used everywhere below)
+
+- **Signal**: any piece of data that might predict where prices go (e.g. "funding rates predict returns").
+- **IC (Information Coefficient)**: a score from −1 to +1 for how well a signal's predictions line up with what actually happened. 0 = useless. Real, tradeable signals are tiny — 0.02–0.05.
+- **t-stat**: "how sure are we this isn't luck?" Roughly: |t| > 2 means less than ~5% chance it's a fluke. Our rule: no t-stat, no trust.
+- **Sharpe ratio**: return earned per unit of risk taken. 0.5 = decent, 1.0–1.5 = excellent, 4+ in a backtest = probably fooling yourself.
+- **Backtest**: replaying a strategy on historical data to see what it *would* have made. Dangerous because it's easy to accidentally cheat.
+- **Diagnostic (vs backtest)**: a pure statistics test of whether a signal predicts anything at all — run BEFORE any backtest, so we never waste time (or fool ourselves) backtesting noise.
+- **Funding rate**: every 8 hours, perpetual-futures exchanges transfer money between long and short traders to keep the perp price near spot. Crowded longs → longs pay shorts.
+- **Dollar-neutral**: equal money long and short, so the market crashing or pumping roughly cancels out — we bet on the *gap between* coins, not the direction of crypto.
+- **Maker / taker**: maker = patient limit order that waits to be filled (cheap fees); taker = order that executes instantly by crossing the spread (expensive). Our strategy only works with maker execution.
+- **Drawdown**: how far the account has fallen from its peak. Our tripwire: −10% → halt and investigate.
+- **Shadow trading**: running the strategy against live market data with imaginary money — the only test that can't be accidentally cheated, because the future hadn't happened when we wrote the code.
 
 ---
 
 ## Quick Summary
 
-CIFR-QUANT is a systematic-trading research project building toward a quant firm. User is Raj (s3702111), UTwente student. Works across HP Windows laptop (dev) + UTwente HPC (all heavy compute).
+CIFR-QUANT is a systematic-trading research project building toward a quant firm. Raj (s3702111), UTwente student. HP Windows laptop = dev; UTwente HPC = all heavy compute.
 
-**The project pivoted on June 10, 2026.** Phase 1 — directional trading on the Kronos financial foundation model (102M, OHLCV candles) — was completed and **rigorously falsified**: the model has no extractable edge of any kind (directional, cross-sectional, or volatility-beyond-persistence) on crypto 15m or commodity 4h data. See "Phase 1 Post-Mortem" below for the full evidence chain.
+**In plain terms**: we set out to make an AI model predict crypto/commodity prices and trade on it. We tested that idea to destruction — it doesn't work — and in the process built something more valuable: a fast, honest *testing machine* for trading ideas. We then pointed that machine at better data (funding rates), found one real, statistically proven strategy, and as of June 10 it's running live on fake money, fully automated, while we hunt for the next one.
 
-**Current direction (v2): the Signal Factory.** Keep the validated research pipeline (forecast cache, pluggable strategy engine, IC/t-stat diagnostics, CQR, walk-forward backtest, HPC workflow) and point it at **information-bearing inputs** instead of price candles: funding rates, open interest, liquidations, basis — starting with funding-rate carry, the best-documented edge in crypto. Kronos is retired from the signal path. The LLM layer is repositioned from "strategy picker" (information-free) to a future **text→feature data source**. Detailed plan in PROJECT_PLAN.md ("The Plan Now (v2)").
+**The two eras**:
+1. **v1 (June 2025 – June 10, 2026)**: Kronos foundation model → directional trading. **Falsified** — the model has no predictive edge of any kind on price candles. Full evidence chain below.
+2. **v2 (June 10, 2026 →)**: the **Signal Factory** — test many simple trading ideas against hard statistics; trade only what survives. First survivor: **funding-rate carry** (+9%/yr backtested, profitable every year since 2022, market-neutral), now in a 30-day live shadow run.
 
 ---
 
-## Current Status: Phase 2 — FIRST SIGNAL PASSED THE GATE (June 10, 2026)
+## THE LIVE MACHINE (what is running right now, unattended)
 
-**Funding-rate carry is real.** Phase 2A (data) + 2B (diagnostic) complete in one day:
-- `scripts/fetch_derivs.py` fetched funding (4.9k events/asset since 2022), perp 1h
-  klines (39k rows/asset), OI (30d, accumulating) for 14 assets (MATIC delisted) →
-  `data/raw/derivs/` on HPC.
-- `scripts/carry_skill.py`: **8h cross-sectional IC −0.020, t=−4.83 pooled;
-  negative in ALL 5 years (2022-26), |t|≥2.2 in 4/5, strongest in 2026 (−2.79 —
-  not decaying). Per-asset sign consistency 93%.** First |t|>2 of the project
-  (Kronos's best was +0.76). Tradeable horizon = 8h (1d unstable, 3d noise).
-- Harvest leg: majors yield +5-8% ann. unconditionally BUT regime-dependent
-  (+11.6% 2024, negative 2022/2026) → conditional/cross-sectional designs only.
-  BNB structurally negative funding (−5.8%/yr, shorts pay) — anomaly, investigate.
-- **Earned backtest run & iterated (6 configs total, ledger counted). BRICK #1
-  FROZEN: `v2_maker_8h` = K=3, --smooth 9, --exit-band 2, 8h cadence, maker
-  costs (0.03%/side): +9.0%/yr, Sharpe 0.52, dollar-neutral, NET POSITIVE ALL
-  5 YEARS** (2022 +14.9 / 2023 +22.6 / 2024 +1.8 / 2025 +4.1 / 2026 +5.5).
-  Decomposition: price +31% / funding +35% / costs −17% over 4.5y. Turnover
-  0.11 gross/event (smoothing+band hysteresis vs 0.91 naive — naive taker
-  version lost −91% to fees despite +124% gross: implementation matters).
-  Honest read: equity-curve t≈1.1 alone is weak; credibility = diagnostic
-  t=−4.83 + mechanical funding leg + 5/5-year consistency. Deflated for 6
-  trials → true expectation somewhat below Sharpe 0.5. NO MORE CARRY TUNING —
-  next iteration risk is overfitting. Known gaps: maker fill risk (priced only
-  by paper trading), maxDD −30% (fix = portfolio-level vol targeting, not
-  carry tweaks). Results: `results/backtest/carry_backtest_v2_maker_8h.json`.
+| When (CEST) | Job | What it does |
+|---|---|---|
+| 02:05 / 10:05 / 18:05 | **Shadow book** (`paper_trade_carry.py`) | Trades the frozen strategy with imaginary money against real prices/funding; also measures whether our patient orders *would* have filled (synthetic fill check) |
+| 02:10 / 10:10 / 18:10 | **OKX demo book** (`okx_demo_trade_carry.py`) | Places REAL limit orders on OKX's fake-money exchange — measures actual fill behavior on a venue we could legally go live on |
+| :30 every hour | **Heartbeat** (`heartbeat_carry.py`) | Pings Raj's phone (ntfy topic `cifr-carry-rj76x2`) if a book stops updating or drops 10% from peak |
+| Sun 03:00 | **OKX funding accumulator** | Saves OKX funding history weekly (their API only keeps ~3 months — we must build our own archive) |
+
+**In plain terms**: two robots trade the same strategy every 8 hours — one on paper, one with real orders on a practice exchange — while a watchdog guards them. No human action needed.
+
+**Why this setup**: a backtest can be accidentally cheated (you already know the future when you write it). The only un-cheatable test is running the strategy *forward* on data that didn't exist yet. The 30-day window verifies: (a) the strategy behaves live like the backtest promised, (b) our patient limit orders actually fill (the one cost assumption a backtest can't prove), (c) the operations don't break. **Important**: 30 days of profit/loss is statistically meaningless for a Sharpe-0.5 strategy — we judge the checklist, never the PnL sign.
+
+**Checkpoints**: ~June 24 (two-week read of the CSVs), ~July 10 (day-30 graduation review → live-capital conversation).
+Logs: `results/paper/{carry,okx_demo}_history.csv`, `slurm/logs/*.log`.
+
+---
+
+## BRICK #1: Funding-Rate Carry (the firm's first validated strategy — FROZEN)
+
+**The strategy in one sentence**: every 8 hours, rank 14 crypto perpetuals by their average funding over the last 3 days; bet AGAINST the 3 with the most expensive funding (short them) and ON the 3 with the cheapest (long them), equal money each side.
+
+**In plain terms — why this makes money** (two engines, both proven in the data):
+1. **Collection**: shorting expensive-funding coins means the crowd of leveraged longs literally pays us cash every 8 hours (and longs on negative-funding coins get paid too). Like collecting rent. (+35% of backtest PnL)
+2. **Prediction**: coins with expensive funding are crowded trades, and crowded trades underperform over the next hours. We're short exactly those. (+31% of backtest PnL)
+The counterparty losing money is the leveraged trader knowingly paying for leverage — an edge with an identifiable, willing payer, which is why it persists.
+
+**The numbers**:
+- Diagnostic: 8h cross-sectional IC −0.020, **t = −4.83**, negative in ALL 5 years (2022–26), strongest in 2026 (not decaying). 93% of assets agree on sign.
+- Backtest (frozen config `v2_maker_8h`: K=3, 3-day smoothing, exit band 2, 8h cadence, maker fees 0.03%/side): **+9.0%/yr, Sharpe 0.52, NET POSITIVE ALL 5 YEARS** (2022 +14.9 / 2023 +22.6 / 2024 +1.8 / 2025 +4.1 / 2026 +5.5), max drawdown −30%.
+- Cross-venue check: the same effect exists on OKX's own data (t = −2.68 on the available 3 months, 13/13 assets agree) → it's a market-wide phenomenon, not a Binance quirk.
+
+**Why each design choice** (every number was measured, not guessed):
+- **8h cadence**: funding only updates every 8h (no new info sooner), the predictive edge dies after ~1 day (no point slower), and 8h beat daily in A/B (Sharpe 0.52 vs 0.43).
+- **3-day smoothing + exit band**: the naive version flipped half the book every cycle and lost **−91% to fees despite +124% gross profit**. Smoothing the ranking and letting incumbents keep their seats cut trading 8× — that single fix is the difference between the strategy existing and not.
+- **Maker (patient) orders**: fee math only works at ~0.03%/side; instant (taker) execution at 0.08% eats the edge. Hence the fill-rate measurement obsession.
+- **No stop-losses per position**: these aren't directional bets — the book is hedged as a whole (dollar-neutral), and a per-position stop would *un-hedge* it at the worst moment. Risk control = neutrality + position caps + the −10% portfolio tripwire + the 8h rebalance itself.
+- **FROZEN**: 6 configurations were tried (counted!); the best-of-6 Sharpe is optimistically biased, and every further tweak risks fitting noise. Any change = a new strategy that must re-earn its gate.
+
+**Honest weaknesses**: equity-curve evidence alone is weak (t≈1.1 — the credibility comes from the diagnostic + the mechanical funding leg + 5/5-year consistency); maxDD −30% vs +9%/yr is poor (fix = portfolio-level vol targeting once brick #2 exists, not carry tweaks); maker fill risk unproven until the live measurements land; single-name blowup risk (a short pumping 50% costs ~8%).
 
 ---
 
 ## Phase 1 Post-Mortem: The Kronos Thesis, Tested and Falsified (June 6–10, 2026)
 
-### The original thesis
-Finetune Kronos (foundation model for candlesticks) per market → ensemble MC-path forecasts → CQR-calibrated bands → directional trades sized by risk parity → an LLM layer on top picking/adapting strategies with market conditions. Two markets: crypto (15 assets, 15m, Binance) and commodities (6 assets, 4h, TwelveData/yfinance).
+**In plain terms**: the original idea was "a big AI model trained on millions of price charts can predict the next candles; trade those predictions, with an LLM on top adapting strategies to the market." We built all of it, then measured the predictions themselves — and they turned out to be statistically indistinguishable from coin flips, every way we sliced it. The strategies lost money not because they were badly designed, but because there was nothing upstream to trade on.
 
-### What was built (all of it works and is reusable)
-- Finetuned checkpoints: BTC v1/v2, XAU v1/v2 (EUR dropped earlier). Ensembles = zero-shot + 2 finetunes per market (`src/model/build.py`).
-- Batched MC path generation (`src/model/batched_inference.py`) — ~20x effective speedup on L40S vs the per-path loop (Kronos's `sample_count=N` averages paths; we replicate the AR loop without averaging).
-- CQR calibration for all 21 assets, 90% target → 91-92.5% achieved (`results/cqr/cqr_calibrations.json`).
-- **Forecast cache** (`src/model/forecast_cache.py` + `scripts/build_forecast_cache.py`): run the GPU ensemble ONCE over the walk-forward grid, dump per-(asset, rebalance) forecasts to `results/forecasts/` → all strategy testing becomes CPU-only and instant. This is the single most valuable infra piece.
-- **Pluggable strategy engine** (`src/backtest/portfolio_engine.py` + `strategy_api.py` + `strategies.py` + `sizing.py` + `grid.py`): Strategy/Sizer/RegimeClassifier injected; baseline proven logically equivalent to the original inline engine (regression test `scripts/test_strategy_equivalence.py`).
-- **Skill diagnostics** (`scripts/forecast_skill.py`, `horizon_skill.py`, `vol_skill.py`): IC, rank IC, t-stats, hit rates, confidence stratification, horizon curves, vol-vs-persistence baselines.
-- Regime classifier (Hurst+ADX, `src/regime/`) — built, tested, found net-negative (below).
+### What was built (works, reusable)
+Finetuned checkpoints (BTC v1/v2, XAU v1/v2); batched MC path generation (`src/model/batched_inference.py`, ~20x speedup — Kronos's own API silently *averages* paths); CQR calibration, 21 assets, 90% target → 91-92.5% achieved; **forecast cache** (run the GPU model once, test strategies CPU-only in seconds — the key enabler of fast iteration); **pluggable strategy engine** (swap strategies/sizers without touching the engine; proven equivalent to the original by regression test); **skill diagnostics** (the statistical gauntlet — became the heart of v2); Hurst+ADX regime classifier (tested, net-negative).
 
-### The evidence chain (chronological — every escape hatch tested and closed)
+### The evidence chain (each step closed one escape hatch)
+1. **First backtest**: crypto −23.4%, commodity **+16.0%** (Sharpe 4.36!). *Why we didn't celebrate*: same engine, opposite results = something structural, and Sharpe 4 on one window smells like luck. Investigate, don't ship.
+2. **Strategy A/B sweep** (regime gates, mean-reversion): every variant lost. *Telltale*: crypto had **0 take-profits in 2,341 trades** — the CQR bands were too wide to ever trigger; trades just rode 12h to timeout. The "strategy" was a pure direction bet.
+3. **ATR exits** (working stops/targets): crypto *still* lost at every risk/reward setting. *The smoking gun*: with symmetric stops (a fair coin would break even), win rate was **48.9%** — the direction call itself was sub-coinflip.
+4. **Direct skill measurement** (decouple model from strategy): crypto hit rate 50.8% (noise), IC +0.004 (noise). Model "confidence" meaningless (82% of forecasts pinned at max confidence, which hit 50.7%). Cross-sectional ranking (can it pick relative winners?): t = +0.76 — nothing. **And commodity's +16% exposed**: coinflip direction + a strongly trending quarter = the profit was the market's trend (beta), not skill (alpha).
+5. **Every horizon tested** (h=1..48): IC ≈ 0 everywhere. No "it works at short horizons" escape. (Commodity's exciting small-sample blip, IC +0.29 on n=24, collapsed to +0.05 at n=384 — the canonical small-sample trap.)
+6. **Volatility forecasting** (last hypothesis): the model's uncertainty bands DO correlate with future volatility (+0.34) — but a free, two-line "tomorrow's vol ≈ recent vol" rule scores **+0.61**. The model is a worse version of a moving average.
 
-1. **Backtest #1 (job 511139, June 9)** — single directional strategy, 90-day walk-forward:
-   crypto **−23.4%** (Sharpe −3.28), commodity **+16.0%** (Sharpe 4.36), combined −5.1%.
-   Suspicious asymmetry → investigate rather than celebrate commodity.
-
-2. **Strategy A/B sweep off the forecast cache** (baseline reproduced: −23.7%/+14.1% → refactor faithful):
-   | Strategy | Crypto | Commodity | Key telltale |
-   |---|---|---|---|
-   | directional (baseline) | −23.7% | +14.1% | crypto exit mix 0 tp / 31 sl / **2341 timeout** |
-   | regime_gated_trend (strict & relaxed) | −2 to −6% | **0 trades** | Hurst never labels trending energy "trend" |
-   | mean_reversion (ATR exits) | −6.2% | +1.8% | exits actually fire (106 tp/195 sl/25 to) |
-   - Finding A: **CQR band is inert as SL/TP** (calibrated for coverage, far too wide intrabar) — directional was a pure 12h horizon bet.
-   - Finding B: **Hurst+ADX regime gating is net-negative** — killed the only profitable book.
-
-3. **ATR-exit sweep (`directional_atr`, RR 1.0/1.5/2.0)** — "winning direction + working exits":
-   crypto −26% at every RR; **atr_10 (symmetric RR) win rate 48.9% = sub-coinflip — the smoking gun**;
-   commodity fell +14% → −5% (tight stops cut trend winners → its profit was drift-riding, not skill).
-
-4. **forecast_skill.py (decouple forecaster from strategy)** —
-   crypto n=2516: hit 50.8% (0.8σ), pooled IC +0.004 (noise floor 0.020), signed edge negative;
-   commodity n=384: hit 50.3%, IC −0.022. **Confidence degenerate**: 82% of forecasts pinned >0.80 conf, that bucket = coinflip.
-   **Cross-sectional rank IC** (can it pick relative winners?): crypto mean +0.019, **t = +0.76** (NS); commodity t = −0.01.
-   → Commodity's +14% was **beta** (coinflip direction + big asymmetric trend moves), not alpha.
-
-5. **horizon_skill.py (GPU, jobs 511874 + 511916)** — IC/hit at EVERY horizon step:
-   crypto h=1..48: IC ∈ [−0.05, +0.04] around zero, hit mostly <50%. No short-horizon skill hiding.
-   commodity with proper n=384: h=1 IC +0.053 / hit 49.0% (the n=24 "IC +0.29 flicker" was sampling noise).
-
-6. **vol_skill.py** — last hypothesis: maybe it predicts volatility.
-   pred_width vs realised vol: crypto IC +0.34, commodity +0.44 — **but naive persistence (trailing realised vol) scores +0.61 / +0.46**. The model's vol forecast is a degraded echo of recent vol. (The cross-sectional vol t=25 is the trivial DOGE-is-always-more-volatile-than-BTC ranking.)
-
-### Final verdict table
+### Verdict
 | Capability | Result |
 |---|---|
-| Directional, time-series, any horizon, both markets | **none** |
-| Cross-sectional ranking | **none** (t = 0.76 / −0.01) |
-| Volatility forecasting | **≤ naive persistence** (which is free: IC 0.61) |
-| CQR uncertainty calibration | works — but only because vol persists |
+| Price direction (any horizon, both markets) | none |
+| Relative ranking of assets | none |
+| Volatility forecasting | worse than naive persistence |
+| Uncertainty calibration (CQR) | works — but only because vol persists |
 
-**Kronos on OHLCV alone adds zero extractable information beyond trailing realised vol.** Not a tuning failure: strategy structure, exits, gating, confidence, horizon, and cross-section were all tested with proper statistics.
-
-### Why it failed (the lesson that defines v2)
-- **Edge lives in the inputs, not the model.** Kronos was already trained on 12B+ candles from 45 exchanges and still has nothing — OHLCV is the most-arbitraged dataset on earth. A bigger in-house model on the same data would learn the same nothing.
-- **Information cannot be created downstream.** The planned LLM strategy layer sat downstream of Kronos's output; an LLM reasoning about a coinflip is still betting on a coinflip. (We effectively ran that layer's job manually via the strategy sweep — every variant lost.) "Keep changing strategies with the market" without t-stat discipline = overfitting machine.
-- **The +14% trap**: a beautiful single-window backtest (Sharpe 4.36!) that was pure regime beta. Without the skill diagnostics we'd have shipped it.
-- **What a quant firm actually is**: (1) a signal factory that cheaply kills bad hypotheses ← **built and proven**, (2) a portfolio of small validated uncorrelated edges ← have zero, this is the gap, (3) execution + risk ← backtest half built.
+### Why it failed — the three lessons that define v2
+1. **Edge lives in the inputs, not the model.** Price candles are the most-analyzed dataset on earth; whatever was predictable in them was arbitraged away years ago. Kronos trained on 12B candles and learned nothing tradeable — a bigger in-house model on the same data would learn the same nothing at 1000× the cost. *Consequence*: change the data, never the model size.
+2. **Intelligence downstream of a coin flip is still a coin flip.** The planned LLM strategy-picker consumed Kronos's output; no reasoning can add information that isn't in its input. (We ran that layer's job manually via the strategy sweep — every variant lost.) *Consequence*: LLMs re-enter UPSTREAM, turning text (news/sentiment) into new input data — never as a strategy chooser.
+3. **The +16% trap.** A gorgeous single-window backtest that was pure market trend. Without the statistics-first discipline we'd have shipped it and been wrecked in the next flat quarter. *Consequence*: the methodology rules below are non-negotiable.
 
 ---
 
-## What's Next (v2 Roadmap — In Order)
+## Phase 2: The Signal Factory (June 10) — candidates tested, one survivor
 
-1. ✅ **Phase 2A — Derivatives data layer**: `scripts/fetch_derivs.py` done June 10; 14 assets of funding / perp-1h / OI in `data/raw/derivs/` (HPC).
-2. ✅ **Phase 2B — Carry signal diagnostic**: **GATE PASSED** — 8h XS t=−4.83, negative all 5 years, |t|≥2.2 in 4/5. Earned backtest built (`scripts/backtest_carry.py`), first run pending.
-3. 🔄 **Phase 2C — More signal candidates** (June 10 results so far):
-   - ❌ **XS momentum** (momo_skill.py): FAILED — grid signs incoherent, no cell
-     near significance, year-unstable. Closed without a backtest.
-   - ❌ **Short-term reversal** (7d→1d, found by scan at t=−2.86): passed the
-     marginal gate but backtest price leg lost −105% across ALL years.
-     **LESSON → GAUNTLET UPGRADE: rank IC measures the whole cross-section; a
-     K-portfolio trades the TAILS, which in crypto trend violently (death
-     spirals/pumps) while the middle reverts. Every future diagnostic must
-     include a construction-matched tail-spread test (bottom-K minus top-K
-     forward return) before any backtest is earned.** Added to momo_skill.py.
-   - ✅ Tail-spread check confirmed the reversal post-mortem: bottom-3-minus-top-3
-     spread −0.108%/day pooled, negative EVERY year → middle reverts, tails trend.
-     Mirror trade (tail momentum) decayed −0.23%/day (2022) → −0.006% (2026): dead.
-   - ❌ **TSMOM** (tsmom_skill.py): equal-notional AND canonical inverse-vol-scaled
-     both fail — best t≈1.6, 2025 negative in every lookback/construction. All-cells-
-     positive grid was suggestive but cells share trades; not 12 confirmations. Closed.
-   - **2C scoreboard: carry ✅ / XS momo ❌ / reversal ❌ / tail-momo ❌ / TSMOM ❌.**
-     1-in-5 hit rate = normal. Remaining queue BLOCKED ON DATA: OI/squeeze (OI history
-     accumulating since June 10, ~30d), commodity futures carry (term structure/COT —
-     needs new data source; commodities DEPRIORITIZED not scrapped — spot candles carry
-     no term structure), Phase 3 text features.
-   - NOTE: none of Phase 2 touches Kronos — all CPU statistics over derivs CSVs.
-     Complexity must be earned; ML returns only behind validated features.
-4. 🔄 **Phase 4 v1 — SHADOW PAPER TRADING (started June 10)**: `scripts/paper_trade_carry.py`
-   runs the FROZEN carry config live every 8h via cron on the HPC head node (network
-   I/O only). Fetches real funding + marks, accrues real funding on the held book,
-   simulates fills at mark±3bp, persists `results/paper/carry_state.json` +
-   `carry_history.csv`. Measures signal-live consistency vs backtest. Frozen params
-   in the script header — ANY change = new strategy, must re-earn the gate.
-   v2 fill-risk measurement (June 10): Binance testnet is DOWN for revamp and
-   Binance demo is unreachable from NL (**Binance withdrew from the Netherlands
-   in 2023 — geo-blocked**). Pivot: (a) synthetic maker-fill measurement built
-   INTO the shadow trader — records bid/ask at decision time, next cycle checks
-   whether price traded STRICTLY through the level over the 8h window = LOWER
-   BOUND on maker fill rate (`synth_orders`/`synth_filled` columns; measurement
-   only, frozen economics untouched). `scripts/testnet_trade_carry.py` exists
-   (points at demo-fapi.binance.com) but is unusable from NL; adapt to OKX demo
-   (MiCA-licensed, legal in NL, ccxt-supported) if account-based simulation is
-   needed. **STRATEGIC: the live venue cannot be Binance from NL.** Candidates:
-   OKX (CEX, MiCA) or Hyperliquid (permissionless DEX perps, carry-friendly).
-   Venue selection = Phase 4.5 decision; note venue funding rates ≠ Binance
-   funding rates — re-validate carry on the chosen venue's own funding data
-   before going live there.
-   **OKX DEMO LIVE (June 10 04:31 UTC)**: `scripts/okx_demo_trade_carry.py`
-   placed the firm's first real orders — 5 post-only limits on OKX demo
-   (75k fake USDT, 0 rejects, contract-size conversion verified across
-   XRP/DOGE/SOL/LINK/ATOM). Signal = Binance funding (frozen, imported from
-   paper_trade_carry); OKX = execution lab only. Quirk found: **no UNI perp in
-   OKX demo** → book runs 3L/2S (~17% net-long) when UNI is in the short leg —
-   acceptable for fill measurement, relevant to Phase 4.5 venue choice.
-   **Phase 4.5 OKX validation (June 10)**: fetched OKX's own funding (API serves
-   only ~3 months — 278 events) + perp klines (BNB perp empty, MATIC absent → 13
-   assets). carry_skill --exchange okx: **8h XS IC −0.050, t=−2.68; 1d per-asset
-   IC negative in 13/13 assets** — same strength as Binance over the same window
-   (2026: −0.041/−2.79). The carry effect is MARKET-WIDE, not Binance-specific →
-   **OKX provisionally validated as live venue** (full multi-year native
-   validation impossible from API; mitigation: funding fetch is now INCREMENTAL/
-   appending — weekly cron accumulates OKX history going forward). OKX harvest
-   thin (+0.95%/yr) but so is Binance 2026 (−0.95%) — low-funding regime, not a
-   venue gap; the XS book is insensitive to the level by construction.
-   Cron stack (head node, CEST): :05 shadow, :10 OKX demo, :30 hourly heartbeat,
-   weekly Sun 03:00 OKX funding accumulation.
-   Logs: results/paper/{carry,okx_demo}_history.csv. Day-30 graduation review
-   reads all three measurements (shadow PnL consistency, synthetic fill lower
-   bound, OKX real fill rate).
-4. ⏳ **Phase 2D — Portfolio the survivors**: validated signals → pluggable engine (`--strategy` plug-ins) with **vol-targeted sizing** (vol persistence IC 0.61 is free and proven — it's the risk layer, not the alpha).
-5. ⏳ **Phase 3 — LLM as data source** (the v1 vision, pointed the right way): text→features (news/sentiment/events) → same IC diagnostics. NOT a strategy picker.
-6. ⏳ **Phase 4 — Paper trading loop** (Binance testnet) — makes it a firm, generates execution data.
-7. ⏳ **Phase 5 — Proprietary platform** (build thin slices as pain appears, NOT a big-bang UI):
-   (a) ops/alerting FIRST — cron heartbeat + tripwire alerts (Telegram/email); a silent
-   cron death would quietly kill the 30-day shadow run; (b) monitoring dashboard (shadow
-   equity vs backtest band, book, funding vs expected) around testnet graduation;
-   (c) research console + AUTOMATED TRIAL LEDGER (every diagnostic/backtest config +
-   t-stat logged to a registry — makes deflated-Sharpe corrections automatic) when
-   signal #2 enters; (d) execution console + kill switch only when real capital.
+**In plain terms**: instead of one big model, we now test simple trading ideas one at a time against hard statistics. Most die — that's the point and that's normal (industry hit rates are low). Each test costs minutes and pennies. The survivors get backtested with realistic fees, and only then traded.
 
-**Methodology rules (non-negotiable, learned the hard way):**
-- A signal must pass IC/t-stat diagnostics (|t|>2) BEFORE any backtest is run on it.
-- Count every variant tried; deflated Sharpe / multiple-testing haircut on anything that looks good.
-- Multi-window walk-forward, never a single 90-day window. Final test window touched once.
-- Costs modeled from day one. Vol-targeted sizing as default risk layer.
+**The scoreboard (5 candidates in one day)**:
+| Candidate | Idea in plain terms | Verdict & why |
+|---|---|---|
+| **Funding carry** | bet against coins whose leveraged longs are paying heavily | ✅ **Brick #1** — t=−4.83, stable 5/5 years |
+| XS momentum | recent winner coins keep winning vs losers | ❌ statistics incoherent — no there there |
+| Short-term reversal | last week's losers bounce back tomorrow | ❌ passed stats marginally, but the *portfolio* lost every year — see lesson below |
+| Tail momentum | the mirror trade of reversal | ❌ was real in 2022, decayed to zero by 2026 |
+| Trend-timing (TSMOM) | each coin: long when rising, short when falling | ❌ 2025 negative in every variant; can't beat noise |
 
-### Status of old roadmap items
-- ~~Regime detection~~ — built, tested, net-negative as a gate on a zero signal. `src/regime/` kept (indicators reusable for vol sizing).
-- ~~Meta-labeling (task #9)~~ — cancelled: nothing upstream to filter.
-- ~~LLM strategy layer (v1 design)~~ — cancelled as designed; repositioned to Phase 3 text-features.
-- ~~Final Kronos test-set evaluation~~ — moot; verdict already conclusive at proper significance.
+**The reversal lesson (a gauntlet upgrade we paid −105% in backtest ink to learn)**: the statistic said "coins mildly mean-revert" — true *on average across all 14*. But a real portfolio only trades the *extremes*, and in crypto the extremes do the opposite (crashing coins keep crashing — LUNA-style; pumping coins keep pumping). **Rule added: every diagnostic must also test exactly what the portfolio would trade (bottom-K minus top-K), not just the average relationship.**
+
+**Why simple statistics and no ML here**: the carry relationship is nearly linear — a rolling average and a sort capture it fully; a neural net would add overfitting risk and remove interpretability. **Complexity must be earned**: ML returns when there are several validated signals to *combine* (a genuine ML problem); LLMs return when we want features from *text* (a genuinely-LLM problem).
+
+**Remaining candidate queue (blocked on data, not on us)**: open-interest/squeeze signals (OI history accumulating since June 10 — ripe ~end of June); commodity futures carry (needs futures-curve/COT data — commodities deprioritized, NOT scrapped: our spot candles simply don't contain the term-structure information that commodity edges live in); Phase 3 text features.
+
+---
+
+## Phase 4 events (June 10): going live on fake money — and what we hit on the way
+
+**In plain terms**: we put the strategy on autopilot with imaginary money, tried to also test it on Binance's practice exchange, discovered Binance is closed to the Netherlands, pivoted to OKX (which is legal here), verified the strategy's edge exists on OKX's own data too, and left a four-job autonomous machine running.
+
+- **Shadow book live** (8h cron). *Why first*: cheapest un-cheatable test; measures signal-vs-backtest consistency.
+- **Synthetic fill measurement** added into the shadow book: record the live bid/ask at decision time; 8h later check if price traded through it. *Why*: gives a pessimistic lower bound on "do our patient orders fill?" using only public data — no account, no geo-block can take it away.
+- **Binance testnet dead end**: old testnet down for revamp; new demo geo-blocked (**Binance withdrew from NL in 2023**). *Strategic discovery*: the live venue can never be Binance — candidates are **OKX** (centralized, MiCA-licensed, legal in NL) or **Hyperliquid** (permissionless DEX). `testnet_trade_carry.py` kept but unusable from NL.
+- **OKX demo live** (04:31 UTC): the firm's first real orders — 5 post-only limits, 0 rejects, all contract-size math verified. 4 of 5 filled within the hour. Quirk: OKX demo lists no UNI perp → book occasionally 3-long/2-short (~17% net exposure) — flagged for the venue decision.
+- **OKX validation** (`carry_skill --exchange okx`): the carry edge on OKX's own funding/prices: t=−2.68 over the 3 months their API serves, **13/13 assets agree on sign**, same strength as Binance over the identical window. *Why this mattered*: we trade OKX's funding if we go live there, not Binance's — Raj spotted this gap and the test closed it. OKX = provisionally validated live venue. *Data caveat handled*: OKX's API only serves ~3 months of funding history → fetcher made incremental/appending + weekly cron now archives it ourselves.
+- Current regime note: funding is LOW everywhere right now (Binance 2026 harvest is negative). The cross-sectional design is insensitive to the overall level by construction — this is that design choice earning its keep.
+
+---
+
+## Methodology rules (the constitution — each learned the hard way)
+
+1. **Diagnostics before backtests** (|t| > 2 or no backtest). *Why*: backtests of noise produce beautiful accidents; statistics first makes lying to ourselves hard.
+2. **Count every trial; deflate accordingly.** *Why*: try 6 configs and the best one's Sharpe is inflated by selection — we must discount for how much we searched.
+3. **Multi-year stability, never one window.** *Why*: the +16% commodity trap — one good quarter proves nothing; 5-for-5 years is hard to fake.
+4. **Construction-matched tests** (test what the portfolio actually trades). *Why*: the reversal corpse — averages and extremes can disagree violently.
+5. **Costs modeled from day one; fee assumptions verified live.** *Why*: carry was a −91% strategy at naive costs and a +9% one executed patiently — implementation IS the strategy.
+6. **Freeze what passes; changes re-earn the gate.** *Why*: endless tuning = fitting noise; the frozen config is the testable claim.
+7. **Final test window touched once; live shadow = the real out-of-sample.** *Why*: data you've peeked at can't surprise you, and only surprises are evidence.
+
+---
+
+## What's Next (in order, with reasoning)
+
+1. 🔄 **30-day shadow/demo window** (now → ~July 10). Reviews: day-14 (~June 24) read of funding collection + turnover + fill rates vs backtest; day-30 graduation checklist. *Why the wait*: the live measurements are the evidence the go-live decision will rest on; nothing useful can shortcut it.
+2. ⏳ **OI/squeeze diagnostic** (~end June, when OI history is thick enough). *Why next*: data already accumulating, structurally different from carry (positioning vs flows) → a candidate second brick.
+3. ⏳ **Phase 2D — portfolio layer** once ≥2 bricks: combine validated strategies with **vol-targeted sizing** (vol persistence IC 0.61 is free and proven — it's the risk layer, not the alpha). *Why*: fixes carry's −30% maxDD properly, and uncorrelated bricks raise portfolio Sharpe more than any single-strategy tuning could.
+4. ⏳ **Phase 3 — LLM as a data source**: news/events/sentiment → numerical features → the same gauntlet. *Why upstream not downstream*: lesson #2 of the post-mortem; text is the one input where LLMs extract information nothing else can.
+5. ⏳ **Phase 4.5 — venue decision** (OKX vs Hyperliquid) at graduation, on the evidence the demo lab is collecting now.
+6. ⏳ **Phase 5 — platform** in thin slices as pain appears (alerting ✅ done; dashboard at graduation; research console + automated trial ledger when signal #2 enters; execution console + kill switch only when real capital). *Why thin slices*: building a pretty platform around one Sharpe-0.5 book is the classic small-fund failure mode.
+
+### Closed items (and why)
+- ~~Kronos in the signal path~~ — falsified (post-mortem above); checkpoints kept on disk.
+- ~~Regime gating~~ — tested, killed the only profitable book; indicators kept for vol sizing.
+- ~~Meta-labeling~~ — there's nothing upstream to filter.
+- ~~LLM strategy-picker~~ — information can't be created downstream; reborn as Phase 3.
+- ~~Final Kronos test-set eval~~ — moot at this level of significance.
 
 ---
 
@@ -207,67 +177,67 @@ Finetune Kronos (foundation model for candlesticks) per market → ensemble MC-p
 - **Cluster**: UTwente SLURM, head nodes `hpc-head1/2.ewi.utwente.nl`
 - **Best GPUs in main-gpu**: Lovelace (L40S/L40, 48GB) on hpc-node01-18, `--gres=gpu:lovelace:1`
 - **Conda env**: `trade`. Activate: `source $(conda info --base)/etc/profile.d/conda.sh && conda activate trade` (direct path doesn't work)
-- **HuggingFace**: cached on head node; jobs use `HF_HUB_OFFLINE=1` (compute nodes offline)
-- **SLURM sizing**: 8 CPU / 32G is right-sized and backfills fast; 32 CPU / 128G blocks backfill for ~days
-- **Raj runs all SSH/sbatch/git commands himself** — provide commands, he executes & pastes output
+- **HuggingFace**: cached on head node; jobs use `HF_HUB_OFFLINE=1` (compute nodes offline — also why all live-data crons run on the HEAD node, which has internet)
+- **SLURM sizing**: 8 CPU / 32G backfills fast; 32 CPU / 128G blocks for days
+- **Raj runs all SSH/sbatch/git/cron commands himself** — provide commands, he executes & pastes output
 - **Commits**: Raj's credentials only, NEVER any Claude/AI attribution
+- **Crontab**: the 4-job stack (see THE LIVE MACHINE) — `crontab -l` to inspect
 
 ---
 
 ## Development Environment
 
 ### HP Windows 11 laptop (dev machine; small checks/tests ONLY — all real workloads on HPC)
-
-- **Repo**: `W:\cifr-quant` (W: is a `subst` of `C:\Work Drive`)
+- **Repo**: `W:\cifr-quant` (W: = `subst` of `C:\Work Drive`)
 - **Python env**: venv `mlenv` at `C:\Work Drive\envs\mlenv`; activate by typing `mlenv` in PowerShell. Python 3.12.10
 - **GPU**: RTX PRO 1000 (Blackwell), torch cu128, CUDA works
-- **Deps added for project**: `ccxt yfinance twelvedata anthropic python-dotenv` (do NOT install vectorbt/mapie — would downgrade shared numpy/pandas)
-- **Kronos**: gitlink (mode 160000, commit `67b630e`), **no `.gitmodules`** → fresh clone leaves `Kronos/` empty. Restore: `git clone https://github.com/shiyu-coder/Kronos.git Kronos && cd Kronos && git checkout 67b630e`. **Edits inside `Kronos/` do NOT propagate via git — all new code goes in tracked `src/`.**
+- **Deps added**: `ccxt yfinance twelvedata anthropic python-dotenv` (do NOT install vectorbt/mapie — would downgrade shared numpy/pandas)
+- **Kronos**: gitlink (commit `67b630e`), **no `.gitmodules`** → fresh clone leaves `Kronos/` empty. Restore: `git clone https://github.com/shiyu-coder/Kronos.git Kronos && cd Kronos && git checkout 67b630e`. **Edits inside `Kronos/` do NOT propagate via git — all new code goes in tracked `src/`.**
 - **Not present locally** (gitignored, live on HPC): `data/`, `checkpoints/`, `results/`
 - `PYTHONPATH` = repo root + `Kronos` when running locally
-
-### Training/compute: UTwente HPC
-- Checkpoints at `~/cifr-quant/Kronos/checkpoints/`, symlinked to `~/cifr-quant/checkpoints/`
 
 ---
 
 ## File Map (updated June 10, 2026)
 
-### v2-relevant infrastructure (the keepers)
-
+### The live trading stack (v2 active)
 | File | Purpose |
 |------|---------|
-| `src/backtest/strategy_api.py` | Contracts: ForecastBundle, RegimeLabel, AssetDecision, TradeIntent, Strategy, Sizer |
-| `src/backtest/strategies.py` | DirectionalMomentum / DirectionalMomentumATR / RegimeGatedTrend / MeanReversion |
-| `src/backtest/sizing.py` | InverseWidthRiskParity, EqualWeight (VolTarget/Kelly: todo in v2) |
-| `src/backtest/portfolio_engine.py` | Pluggable joint multi-asset walk-forward engine (CPU, off cache) |
-| `src/backtest/grid.py` | Shared rebalance grid + context location (cache & engine must agree) |
-| `src/backtest/costs.py` | Cost models incl. CRYPTO_COSTS / COMMODITY_COSTS |
-| `src/backtest/metrics.py` | Sharpe, drawdown, Calmar, deflated Sharpe |
-| `src/model/forecast_cache.py` | Build (GPU) / load (CPU) per-(asset,rebalance) forecast cache |
-| `src/model/build.py` | build_market_ensemble — single source of truth for ensemble composition |
-| `src/model/batched_inference.py` | Batched MC paths (fixes Kronos's path-averaging) |
-| `src/model/ensemble.py` | EnsemblePredictor (predict_with_quantiles) |
-| `src/regime/indicators.py` | hurst, adx, atr, realized_vol, vol_percentile (reusable for vol sizing) |
-| `src/regime/classifier.py` | Hurst+ADX composite (empirically net-negative as a gate) |
-| `src/risk/cqr.py` | CQR calibration (works as designed) |
-| `scripts/backtest_portfolio.py` | CPU strategy A/B driver (--strategy/--sizer/--tag) |
-| `scripts/build_forecast_cache.py` + `slurm/build_forecast_cache.sh` | One-time GPU cache build |
-| `scripts/forecast_skill.py` | IC / hit / confidence-stratification / cross-sectional rank IC |
-| `scripts/horizon_skill.py` + slurm wrappers | IC + hit at every horizon step |
-| `scripts/vol_skill.py` | Vol-forecast IC vs naive persistence baseline |
-| `scripts/test_strategy_equivalence.py` | Regression proof: refactor == original engine |
+| `scripts/paper_trade_carry.py` | Shadow trader — FROZEN config lives here (K=3, SMOOTH=9, EXIT_BAND=2, 0.03%/side) + synthetic fill measurement |
+| `scripts/okx_demo_trade_carry.py` | OKX demo executor — real post-only orders; imports the frozen signal from paper_trade_carry (single source of truth) |
+| `scripts/heartbeat_carry.py` | Staleness + drawdown-tripwire watchdog → ntfy push |
+| `scripts/testnet_trade_carry.py` | Binance demo executor — kept, but geo-blocked from NL |
+
+### The signal factory (v2 active)
+| File | Purpose |
+|------|---------|
+| `src/data/derivs_client.py` | Venue-agnostic funding/perp/OI fetchers (funding fetch is INCREMENTAL — appends) |
+| `scripts/fetch_derivs.py` | Driver: `--exchange binanceusdm\|okx`, `--what funding\|perp\|oi` |
+| `scripts/carry_skill.py` | The carry diagnostic (IC/t-stats/stability/harvest, `--exchange` flag) |
+| `scripts/backtest_carry.py` | The earned carry backtest (smoothing, band hysteresis, funding cashflows, cost knobs) |
+| `scripts/momo_skill.py` | XS momentum + reversal diagnostic + the construction-matched tail-spread test |
+| `scripts/tsmom_skill.py` | Time-series momentum diagnostic (equal-notional + canonical vol-scaled) |
+| `scripts/backtest_reversal.py` | Reversal backtest (failed; kept as record) |
+
+### v1 infrastructure (reusable; model-dependent parts dormant)
+| File | Purpose |
+|------|---------|
+| `src/backtest/strategy_api.py`, `strategies.py`, `sizing.py`, `portfolio_engine.py`, `grid.py` | Pluggable multi-asset walk-forward engine |
+| `src/backtest/costs.py`, `metrics.py` | Cost models; Sharpe/drawdown/deflated-Sharpe |
+| `src/model/forecast_cache.py`, `build.py`, `batched_inference.py`, `ensemble.py` | Kronos stack (dormant) — cache pattern + batched MC are the reusable ideas |
+| `src/regime/indicators.py`, `classifier.py` | hurst/adx/atr/realized_vol (reusable for vol sizing); composite gate (retired) |
+| `src/risk/cqr.py` | Conformal calibration (works) |
+| `scripts/forecast_skill.py`, `horizon_skill.py`, `vol_skill.py` | The Kronos falsification diagnostics — template for all future signal tests |
 | `docs/STRATEGY_DESIGN.md` | Signed-off pluggable-architecture design doc |
 
 ### Key results on HPC (`results/`)
 | Path | Contents |
 |------|----------|
-| `results/cqr/cqr_calibrations.json` | 21 assets, 90%→91-92.5% coverage |
-| `results/forecasts/{crypto,commodity}_forecasts.csv` | The forecast cache (2516 + 384 rows) |
-| `results/backtest/portfolio_backtest_*.json` | baseline / rgt_strict / rgt_relaxed / meanrev / atr_10 / atr_15 / atr_20 |
-
-### v1 legacy (kept, not in active use)
-Finetune configs (`finetune/config_*.yaml`), finetune SLURM scripts, eval scripts (`zero_shot_baseline.py`, `finetuned_eval.py`, `eval_ensemble.py`), CQR calibration scripts, single-asset engine (`src/backtest/engine.py`), orchestrator (`src/portfolio/orchestrator.py`), LLM strategy layer v1 (`src/strategy/` — llm_generator/executor/context_builder + single-asset strategies), data fetchers (`scripts/fetch_universe.py`, `fetch_commodities_yf.py` — patterns to reuse for fetch_derivs.py).
+| `results/paper/` | LIVE: carry_state/history, okx_demo_state/history, heartbeat_state |
+| `results/backtest/carry_backtest_v2_maker_8h.json` | The frozen brick's backtest |
+| `results/backtest/{portfolio,reversal,carry}_backtest_*.json` | The full trial ledger (count these for deflation!) |
+| `results/cqr/`, `results/forecasts/` | v1 artifacts (calibrations; forecast cache) |
+| `data/raw/derivs/`, `data/raw/derivs_okx/` | Funding/perp/OI per venue |
 
 ---
 
@@ -275,21 +245,23 @@ Finetune configs (`finetune/config_*.yaml`), finetune SLURM scripts, eval script
 
 | Problem | Cause | Fix |
 |---------|-------|-----|
-| `FileNotFoundError` on data | Relative paths resolve wrong from `Kronos/finetune_csv/` | Absolute paths in YAML |
-| HuggingFace 401 | Wrong repo name | `NeoQuasar/Kronos-base`; `hf auth login` with read token |
-| HuggingFace httpx closed | Compute nodes offline | Cache on head node, `HF_HUB_OFFLINE=1` |
-| Checkpoints not found | Saves to `Kronos/checkpoints/`, loader expects `checkpoints/` | `ln -s Kronos/checkpoints checkpoints` |
-| Conda activation fails | Direct path doesn't exist | `source $(conda info --base)/etc/profile.d/conda.sh && conda activate trade` |
-| SLURM job stuck PD for days | Oversized request (128G/32CPU) blocks backfill | Right-size to 32G/8CPU |
-| Long job times out, loses results | Results written only at end | Save incrementally per asset + resume (see calibrate_cqr_multi.py) |
-| SLURM logs invisible mid-run | NFS sync delay | `tee` inside script + `mkdir -p slurm/logs` first |
-| Kronos paths averaged | `predict(sample_count=N)` averages N paths | Use `src/model/batched_inference.predict_paths` |
-| Login-node python = CPU | No GPU on hpc-head | GPU work goes through sbatch, always |
-| Small-n IC looks amazing | e.g. n=24 commodity h=1 IC +0.29 → +0.05 at n=384 | Never read an IC without n and a t-stat |
-| Single-window Sharpe 4+ | Regime beta masquerading as alpha | Decouple signal from strategy; hit-rate + signed-edge separates skill from drift |
-| TwelveData free tier | Only XAU/USD works | yfinance futures for other commodities |
-| Git push rejected on laptop | HPC/remote ahead | `git pull --rebase` then push |
+| Small-n IC looks amazing | n=24 commodity IC +0.29 → +0.05 at n=384 | Never read an IC without n and a t-stat |
+| Single-window Sharpe 4+ | Regime beta masquerading as alpha | Multi-year stability + decouple signal from strategy |
+| Great IC, losing portfolio | Averages vs extremes (reversal corpse) | Construction-matched tail-spread test |
+| Gross profit, net disaster | Turnover × fees (carry v1: −91% net on +124% gross) | Smooth signals, hysteresis bands, maker execution |
+| Cron fires at wrong time | Head node is CEST, funding is UTC | Schedule in local time: 2,10,18 |
+| Binance anything 404s | Binance withdrew from NL (2023) | OKX (MiCA) for accounts; public Binance data still fetches fine |
+| OKX funding history short | API serves ~3 months only | Incremental fetch + weekly cron accumulates |
+| OKX order sizing wrong | Swaps are sized in CONTRACTS (contractSize varies per coin) | Conversion handled in okx_demo_trade_carry.py |
+| OKX order fails re posSide | Account in hedge mode | Demo settings → One-way position mode |
+| Login-node python = CPU | No GPU on hpc-head | GPU work via sbatch; network-only crons on head node |
+| SLURM job stuck PD days | Oversized request blocks backfill | 8 CPU / 32G |
+| Long job times out, loses all | Results written only at end | Incremental save + resume |
+| Kronos paths averaged | `predict(sample_count=N)` averages | `src/model/batched_inference.predict_paths` |
+| HuggingFace on compute nodes | Offline | Cache on head node, `HF_HUB_OFFLINE=1` |
+| Conda activation fails | Direct path doesn't exist | `source $(conda info --base)/etc/profile.d/conda.sh` |
+| Git push rejected on laptop | Remote ahead | `git pull --rebase` then push |
 
 ---
 
-*This file is the single source of truth for project state. Update after every significant change.*
+*Single source of truth for project state. Update after every significant change.*

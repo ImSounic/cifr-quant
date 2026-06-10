@@ -1,10 +1,18 @@
 # CIFR-QUANT: Project Plan
 
+> This plan has plain-language explanations (**In plain terms**) and reasoning (**Why**)
+> throughout, so it stays readable without the technical background. Companion file:
+> PROJECT_STATE.md (current status, glossary, full evidence chains).
+
 ## Overview (v2 — June 10, 2026)
 
 CIFR-QUANT is a systematic-trading research project building toward a quant firm. It is now a **signal factory**: a validated research pipeline (skill diagnostics → pluggable walk-forward backtest → portfolio construction) pointed at **information-bearing market data** — starting with crypto derivatives data (funding rates, open interest, liquidations, basis) where documented, capacity-constrained edges exist that are accessible at small scale.
 
-**v1 of this project (June 2025 – June 10, 2026) was built around the Kronos financial foundation model and was rigorously falsified** — see "How the Project Changed" below. The v1 plan is preserved in full further down this document as the historical record; its infrastructure survives, its thesis does not.
+**In plain terms**: a quant firm is not one magic AI model — it's a *factory* that takes trading ideas in one end and, for each, answers "is this statistically real, and does it survive realistic trading fees?" cheaply and honestly. Most ideas die (normal!). The few survivors get traded, each small, together adding up. We built that factory, and its first survivor — a strategy that gets paid by over-leveraged crypto traders — is now running live on practice money.
+
+**Why this shape**: we learned it the hard way. v1 (June 2025 – June 10, 2026) bet everything on one sophisticated model (Kronos) reading price charts, and was rigorously falsified — see "How the Project Changed" below. The factory approach is the opposite: many cheap, simple, statistically-policed bets on *data that still contains information*. The v1 plan is preserved at the bottom of this document as the historical record; its infrastructure survives, its thesis does not.
+
+**Status snapshot (June 10, 2026)**: Brick #1 (funding carry, +9%/yr backtested, profitable every year 2022–26, market-neutral) FROZEN and running in a 30-day live shadow + OKX-demo window, fully automated on cron. Four other candidates tested and killed in one day. Live venue provisionally selected (OKX — Binance is geo-blocked from NL). Next: day-14/day-30 reviews, then the second signal as data ripens.
 
 **License**: CIFR-QUANT is proprietary (no license). Kronos (vendored, retired from the signal path) is MIT.
 
@@ -75,42 +83,68 @@ PORTFOLIO OF SURVIVORS                        (Phase 2D, existing engine)
   cost models · drawdown halt · deflated Sharpe across all trials
         │
         ▼
-PAPER TRADING → LIVE                          (Phase 4)
-  Binance testnet loop · execution data feeds back into research
+PAPER TRADING → LIVE                          (Phase 4 — LIVE since June 10)
+  shadow book + OKX demo loop · execution data feeds back into research
 ```
 
-### Phase 2A — Derivatives data layer (NOW)
-- `scripts/fetch_derivs.py`: historical **funding rates** (Binance `fapi/v1/fundingRate`, free, 8h interval, years of history), **open interest** history, liquidation data where retrievable, for the 15 tier-1/2 crypto assets. Same pattern as `scripts/fetch_universe.py`; runs on HPC; saves to `data/raw/derivs/`.
-- Spot–perp **basis** computed from existing spot candles + perp marks.
+**In plain terms, top to bottom**: find data that still contains information → turn it
+into candidate trading ideas → make each idea prove itself statistically (most die
+here, cheaply) → trade the survivors together with strict risk sizing → rehearse on
+fake money until the live numbers match the promised ones → only then real capital.
+**Why this order**: every stage exists to catch a specific way of fooling yourself
+before money is exposed; v1 skipped the third stage and paid for it in weeks of GPU
+time instead of (thankfully) cash.
 
-### Phase 2B — First signal: funding-rate carry
-- Best-documented edge in crypto; structurally persistent (longs pay shorts in bull crowding); capacity-constrained (too small for big funds) — being small is the advantage.
-- `scripts/carry_skill.py`: does funding level/percentile predict forward perp returns (negatively)? Time-series IC per asset + cross-sectional rank IC (high-funding vs low-funding assets), t-stats, multiple windows.
-- Also evaluate the **market-neutral harvest** variant (short perp / long spot collects funding directly — closer to arbitrage than forecasting).
+### Phase 2A — Derivatives data layer ✅ DONE (June 10)
+- **What**: `scripts/fetch_derivs.py` — historical **funding rates** (4.9k events/asset since 2022), **perp 1h prices**, **open interest** for the tier-1/2 crypto assets, from Binance (and now OKX via `--exchange`). Funding fetches are *incremental* (append-only) so history accumulates on venues whose APIs only serve a window (OKX: ~3 months).
+- **In plain terms**: we downloaded the record of who-paid-whom between long and short traders, every 8 hours, for 4.5 years, across 14 coins — for free.
+- **Why this data**: price charts are picked clean (v1 proved it on our own data); funding rates are *flows of actual money driven by trader positioning* — newer, less arbitraged, and the documented home of small-scale edges. Liquidation history turned out to be paywalled — skipped.
 
-### Phase 2C — Signal candidates 2..N through the same gauntlet
-- OI-change + funding (crowding/squeeze setups), liquidation-cascade reversion, slow (weekly) cross-sectional momentum on the 15-asset universe.
-- Models stay simple: z-scores, rankings, gradient boosting at most. Complexity is earned, not assumed.
+### Phase 2B — First signal: funding-rate carry ✅ PASSED → BRICK #1 FROZEN
+- **In plain terms**: coins whose leveraged longs are paying heavy funding are crowded trades — bet against them (and collect their payments); bet on the coins where funding is cheap. The loser funding our profit is the leveraged trader knowingly paying for leverage — an edge with a willing payer is an edge that persists.
+- **Diagnostic**: t = −4.83, negative in all 5 years, 93% of assets agree — the first (and so far only) gate pass of the project. Kronos's best-ever was t = 0.76, for contrast.
+- **Backtest journey (the implementation lesson)**: naive version made +124% gross and lost **−91% net to trading fees**. Two mechanical fixes — smooth the ranking over 3 days, let incumbents keep their seats (hysteresis), execute with patient maker orders — cut trading 8× and produced the frozen config: **+9.0%/yr, Sharpe 0.52, profitable all 5 years, market-neutral**. *Why frozen*: 6 configs were tried (counted); more tuning = fitting noise.
+- The pure "harvest" variant (always short perp/long spot) was found regime-dependent (negative in 2022/2026) → rejected in favor of the cross-sectional book, which is insensitive to the overall funding level by construction.
 
-### Phase 2D — Portfolio construction
-- Survivors become strategies in `src/backtest/` (the pluggable engine, unchanged).
-- **Vol-targeted sizing** as default (replaces inverse-CQR-width), drawdown halt, per-market costs.
-- Multi-window walk-forward + deflated Sharpe over the *count of everything tried*.
+### Phase 2C — Signal candidates 2..N through the same gauntlet 🔄 (4 tested, 4 killed — normal)
+- **In plain terms**: we fed four more classic ideas into the factory in one day; the statistics killed them all before they could cost anything. A 1-in-5 hit rate is what this business actually looks like — the factory's job is making the failures cheap.
+- ❌ Cross-sectional momentum (winners keep winning): incoherent statistics, closed.
+- ❌ Short-term reversal (losers bounce back): *passed* the statistical gate marginally but the portfolio lost every year → exposed a gauntlet gap: **averages and extremes can disagree** — the middle of the pack reverts while crypto's extremes (death spirals, moonshots) keep going, and a portfolio trades the extremes. **Gauntlet upgraded**: every diagnostic now also tests exactly what the portfolio would trade (construction-matched tail-spread test).
+- ❌ Tail momentum (the mirror): was real in 2022, decayed to zero by 2026.
+- ❌ Trend-timing/TSMOM (long what's rising, short what's falling — both naive and the canonical vol-scaled construction): 2025 negative everywhere, nothing near significance.
+- **Queue (blocked on data, not effort)**: OI/squeeze signals (~end June, when accumulated OI history is thick enough); commodity futures carry (needs futures-curve/COT data — commodities deprioritized NOT scrapped: spot candles simply don't contain term-structure information); Phase 3 text features.
+- Models stay simple: z-scores, rankings, GBM at most. **Complexity is earned**: ML returns to *combine* several validated signals; never to conjure signal from empty data (that was v1).
 
-### Phase 3 — LLM as a data source (the v1 idea, pointed the right way)
-- Text → features: news, Fed/macro events, protocol incidents, sentiment → scored features → the same gauntlet.
-- Much later, optionally: simple regime-based allocation across *validated* signals (rules first; an LLM allocator only if it beats rules out-of-sample).
+### Phase 2D — Portfolio construction ⏳ (needs ≥2 bricks)
+- Survivors combined with **vol-targeted sizing** (the one thing v1 proved predictable — vol persistence, IC 0.61 — is the risk layer, not the alpha).
+- **Why**: fixes carry's main weakness (−30% maxDD) at the portfolio level, and uncorrelated bricks raise combined Sharpe more than tuning any single one ever could.
 
-### Phase 4 — Paper trading
-- Binance testnet execution loop for the surviving portfolio; live-vs-backtest divergence tracking; slippage/fill data becomes research input.
+### Phase 3 — LLM as a data source ⏳ (the v1 idea, pointed the right way)
+- Text → features: news, Fed/macro events, protocol incidents, sentiment → scored numbers → the same gauntlet.
+- **Why upstream, not downstream**: v1's LLM was a strategy-picker consuming a coinflip — intelligence cannot add information that isn't in its input. Text is the one input where an LLM extracts information nothing else can. Allocation-across-strategies returns much later, rules-first.
 
-### Methodology rules (the constitution — violations are how v1 almost fooled us)
-1. **Diagnostics before backtests.** A signal earns a backtest by passing IC/t-stat tests, never the reverse.
-2. **Count every trial.** Deflated Sharpe / multiple-testing haircut on anything promising.
-3. **Multi-window always.** No conclusions from a single 90-day window (the +14% trap).
-4. **Decouple signal from strategy** when results confuse — hit rate + signed edge separates skill from drift.
-5. **Final test window touched exactly once.**
-6. **Realistic targets**: portfolio Sharpe 1.0–1.5 from several small edges = excellent. No single killer model exists.
+### Phase 4 — Paper trading 🔄 LIVE (June 10)
+- **In plain terms**: the strategy now runs itself every 8 hours — once with imaginary money against real prices (shadow), once placing real practice orders on OKX (demo) — with an hourly watchdog that alerts Raj's phone. Thirty days of this is the only test that can't be accidentally cheated, because the data didn't exist when the code was written.
+- **What each loop proves**: shadow = "does live PnL track the backtest?"; synthetic fill check = pessimistic bound on "do patient orders fill?" from public data alone; OKX demo = real fill rates on a venue we could legally use.
+- **Judged by checklist, not PnL sign** (30 days of a Sharpe-0.5 strategy is statistical noise): funding collection ≈ backtest rate, turnover ≈ 0.1–0.2/event, fill rate high, no tripwire, book matches frozen logic. Day-14 review ~June 24; day-30 graduation ~July 10.
+- **Venue reality discovered en route**: Binance is geo-blocked from NL (withdrew 2023) → live venue = **OKX** (MiCA-licensed; carry edge independently confirmed on OKX's own data, t=−2.68, 13/13 sign agreement) or Hyperliquid (DEX) — decision at graduation, on the fill evidence being collected now.
+
+### Phase 4.5 — Venue decision & live capital ⏳ (after graduation)
+- Choose OKX vs Hyperliquid on measured fills + funding comparability; size initial capital small; live-vs-backtest divergence tracking continues forever (it's how edge death gets detected early).
+
+### Phase 5 — Proprietary platform ⏳ (thin slices, as pain appears)
+- **In plain terms**: eventually a proper dashboard/software instead of terminals — but built piece by piece exactly when each piece earns its keep, because months of UI around one small strategy is the classic small-fund failure.
+- Order: (a) ✅ alerting/heartbeat (done — protects the 30-day run); (b) monitoring dashboard at graduation; (c) research console + **automated trial ledger** (every config and t-stat logged automatically — makes the multiple-testing discipline mechanical) when signal #2 enters; (d) execution console + kill switch only when real money.
+
+### Methodology rules (the constitution — each clause is a scar)
+1. **Diagnostics before backtests** (|t|>2 or no backtest). *Scar*: v1's beautiful backtests of noise.
+2. **Count every trial; deflate the winner.** *Scar*: best-of-6 carry config's Sharpe is optimistic by selection.
+3. **Multi-year stability, never one window.** *Scar*: the +14% commodity quarter that was pure market trend.
+4. **Construction-matched tests** — test what the portfolio trades, not the average. *Scar*: reversal's −105%.
+5. **Costs from day one; execution assumptions verified live.** *Scar*: carry was −91% naive, +9% patient.
+6. **Freeze what passes; changes re-earn the gate.** *Scar*: every tuning pass after a pass is noise-fitting.
+7. **Final test window touched once; live shadow is the real out-of-sample.**
+8. **Realistic targets**: portfolio Sharpe 1.0–1.5 from several small edges = excellent. No single killer model exists.
 
 ---
 
@@ -870,4 +904,4 @@ For posterity, these are the 7 issues caught during review before implementation
 
 ---
 
-*Last updated: June 10, 2026 (rev 5 — v2 pivot: Kronos directional thesis falsified with full evidence chain; project redefined as a signal factory on derivatives/alt data. v1 plan preserved above as historical record.)*
+*Last updated: June 10, 2026 (rev 6 — plain-language + reasoning pass throughout; v2 plan brought current: carry brick #1 frozen and live in shadow/OKX-demo, 4 candidates killed, venue constraints mapped, methodology constitution expanded to 8 rules. v1 plan preserved above as historical record.)*
