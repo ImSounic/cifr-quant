@@ -122,9 +122,15 @@ Finetune Kronos (foundation model for candlesticks) per market → ensemble MC-p
      spirals/pumps) while the middle reverts. Every future diagnostic must
      include a construction-matched tail-spread test (bottom-K minus top-K
      forward return) before any backtest is earned.** Added to momo_skill.py.
-   - ⏳ Remaining queue: time-series momentum, OI-change/squeeze (OI history
-     accumulating since June 10, ~30d available), commodity futures carry
-     (term structure/COT — needs new data source), Phase 3 text features.
+   - ✅ Tail-spread check confirmed the reversal post-mortem: bottom-3-minus-top-3
+     spread −0.108%/day pooled, negative EVERY year → middle reverts, tails trend.
+     Mirror trade (tail momentum) decayed −0.23%/day (2022) → −0.006% (2026): dead.
+   - ⏳ Remaining queue: time-series momentum (tsmom_skill.py, data on disk),
+     OI-change/squeeze (OI history accumulating since June 10, ~30d available),
+     commodity futures carry (term structure/COT — needs new data source; commodities
+     DEPRIORITIZED not scrapped — spot candles carry no term structure), Phase 3 text.
+   - NOTE: none of Phase 2 touches Kronos — all CPU statistics over derivs CSVs.
+     Complexity must be earned; ML returns only behind validated features.
 4. ⏳ **Phase 2D — Portfolio the survivors**: validated signals → pluggable engine (`--strategy` plug-ins) with **vol-targeted sizing** (vol persistence IC 0.61 is free and proven — it's the risk layer, not the alpha).
 5. ⏳ **Phase 3 — LLM as data source** (the v1 vision, pointed the right way): text→features (news/sentiment/events) → same IC diagnostics. NOT a strategy picker.
 6. ⏳ **Phase 4 — Paper trading loop** (Binance testnet) — makes it a firm, generates execution data.
