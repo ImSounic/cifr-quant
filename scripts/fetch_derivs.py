@@ -34,8 +34,10 @@ def main():
                     help="Explicit symbols (default: full tier selection)")
     ap.add_argument("--what", choices=["all", "funding", "perp", "oi"], default="all")
     ap.add_argument("--start", default="2022-01-01")
-    ap.add_argument("--exchange", choices=["binanceusdm", "okx"], default="binanceusdm",
-                    help="Venue to fetch from; non-Binance saves to data/raw/derivs_<exchange>/")
+    ap.add_argument("--exchange", choices=["binanceusdm", "okx", "hyperliquid"],
+                    default="binanceusdm",
+                    help="Venue to fetch from; non-Binance saves to data/raw/derivs_<exchange>/. "
+                         "NOTE: hyperliquid funding is HOURLY (carry_skill resamples to 8h).")
     args = ap.parse_args()
 
     if args.symbols:

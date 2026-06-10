@@ -68,10 +68,16 @@ def load_asset(sym, derivs_dir=DERIVS_DIR):
         return None
     fund = pd.read_csv(f_path)
     fund["timestamps"] = pd.to_datetime(fund["timestamps"])
+    fund = fund.sort_values("timestamps").reset_index(drop=True)
+    # Hyperliquid pays funding HOURLY; resample to the 8h grid (sum of hourly
+    # rates over 8h is directly comparable to a Binance/OKX 8h rate) so every
+    # statistic downstream stays on the same clock.
+    if len(fund) > 3 and fund["timestamps"].diff().median() < pd.Timedelta(hours=5):
+        s = fund.set_index("timestamps")["funding_rate"].resample("8h").sum()
+        fund = s.reset_index().rename(columns={"index": "timestamps"})
     perp = pd.read_csv(p_path)
     perp["timestamps"] = pd.to_datetime(perp["timestamps"])
-    return fund.sort_values("timestamps").reset_index(drop=True), \
-           perp.sort_values("timestamps").reset_index(drop=True)
+    return fund, perp.sort_values("timestamps").reset_index(drop=True)
 
 
 def build_events(fund, perp):
@@ -114,7 +120,8 @@ def build_events(fund, perp):
 def main():
     import argparse
     ap = argparse.ArgumentParser()
-    ap.add_argument("--exchange", choices=["binanceusdm", "okx"], default="binanceusdm",
+    ap.add_argument("--exchange", choices=["binanceusdm", "okx", "hyperliquid"],
+                    default="binanceusdm",
                     help="Which venue's funding/perp data to diagnose")
     args = ap.parse_args()
     derivs_dir = (DERIVS_DIR if args.exchange == "binanceusdm"

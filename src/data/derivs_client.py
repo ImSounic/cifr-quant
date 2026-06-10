@@ -22,8 +22,11 @@ def _exchange(exchange_id: str = "binanceusdm"):
     return getattr(ccxt, exchange_id)({"enableRateLimit": True})
 
 
-def _perp_symbol(spot_symbol: str) -> str:
-    """'BTC/USDT' -> ccxt unified swap symbol 'BTC/USDT:USDT'."""
+def _perp_symbol(spot_symbol: str, exchange_id: str = "binanceusdm") -> str:
+    """'BTC/USDT' -> ccxt unified swap symbol. Hyperliquid is USDC-margined."""
+    if exchange_id == "hyperliquid":
+        base = spot_symbol.split("/")[0]
+        return f"{base}/USDC:USDC"
     return f"{spot_symbol}:USDT"
 
 
@@ -38,7 +41,7 @@ def fetch_funding_history(
     (dedup). This matters on OKX, whose API serves only ~3 months — periodic
     re-runs accumulate history that would otherwise be lost."""
     ex = _exchange(exchange_id)
-    symbol = _perp_symbol(spot_symbol)
+    symbol = _perp_symbol(spot_symbol, exchange_id)
     since = ex.parse8601(f"{start_date}T00:00:00Z")
     now = ex.milliseconds()
 
@@ -86,7 +89,7 @@ def fetch_perp_ohlcv(
 ) -> pd.DataFrame:
     """Perp klines (same schema as spot fetcher: timestamps OHLCV + amount)."""
     ex = _exchange(exchange_id)
-    symbol = _perp_symbol(spot_symbol)
+    symbol = _perp_symbol(spot_symbol, exchange_id)
     since = ex.parse8601(f"{start_date}T00:00:00Z")
     now = ex.milliseconds()
 
@@ -123,7 +126,7 @@ def fetch_oi_history(
     Re-running APPENDS to an existing file (dedup on timestamp) so history
     accumulates if we run this periodically."""
     ex = _exchange(exchange_id)
-    symbol = _perp_symbol(spot_symbol)
+    symbol = _perp_symbol(spot_symbol, exchange_id)
     since = ex.milliseconds() - 30 * 24 * 3600 * 1000  # 30d back (API limit)
 
     rows = []
