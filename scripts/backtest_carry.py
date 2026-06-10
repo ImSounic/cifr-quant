@@ -69,37 +69,56 @@ def load_panels():
     return fund_panel, close_panel
 
 
-def run(fund, close, *, k=3, buffer=0, rebalance_every=1,
+def run(fund, close, *, k=3, exit_band=0, smooth=1, rebalance_every=1,
         cost_per_side=0.0008, capital=100_000.0):
-    """Walk the 8h event grid. Position w formed at event t (using rate paid at
-    t, known then) is held until t+rebalance_every; funding accrues at each
-    intermediate event; costs on |Δw|."""
+    """Walk the 8h event grid. Position w formed at event t (using rates paid up
+    to and including t — known then) is held until t+rebalance_every; funding
+    accrues at each intermediate event; costs on |Δw|.
+
+    smooth:    rank on the trailing mean of the last `smooth` funding events
+               (funding is persistent; single prints churn the ranks).
+    exit_band: band hysteresis — enter on reaching top/bottom K, exit only when
+               falling outside top/bottom (K + exit_band).
+    """
     times = fund.index
     assets = list(fund.columns)
-    w_prev = pd.Series(0.0, index=assets)
+    signal = fund.rolling(smooth, min_periods=1).mean() if smooth > 1 else fund
 
     rows = []
-    last_w = w_prev
+    last_w = pd.Series(0.0, index=assets)
     for i in range(0, len(times) - 1, rebalance_every):
         t = times[i]
-        rates_t = fund.iloc[i]
+        sig_t = signal.iloc[i]
         px_t = close.iloc[i]
-        usable = rates_t.dropna().index.intersection(px_t.dropna().index)
+        usable = sig_t.dropna().index.intersection(px_t.dropna().index)
         if len(usable) < 2 * k + 1:
             continue
 
-        ranked = rates_t[usable].sort_values()      # low funding first
-        longs = list(ranked.index[:k])
-        shorts = list(ranked.index[-k:])
+        order = list(sig_t[usable].sort_values().index)   # low funding first
+        rank_of = {a: r for r, a in enumerate(order)}
+        n = len(order)
 
-        if buffer > 0 and last_w.abs().sum() > 0:   # hysteresis: keep incumbents
-            order = list(ranked.index)
-            for s_ in [a for a in assets if last_w.get(a, 0) > 0]:   # incumbent longs
-                if s_ in order and order.index(s_) < k + buffer and s_ not in longs:
-                    longs[-1] = s_
-            for s_ in [a for a in assets if last_w.get(a, 0) < 0]:   # incumbent shorts
-                if s_ in order and order.index(s_) >= len(order) - k - buffer and s_ not in shorts:
-                    shorts[0] = s_
+        prev_longs = [a for a in assets if last_w.get(a, 0) > 0 and a in rank_of]
+        prev_shorts = [a for a in assets if last_w.get(a, 0) < 0 and a in rank_of]
+
+        # incumbents survive while inside the exit band; best survivors first
+        keep_l = sorted([a for a in prev_longs if rank_of[a] < k + exit_band],
+                        key=lambda a: rank_of[a])[:k]
+        keep_s = sorted([a for a in prev_shorts if rank_of[a] >= n - k - exit_band],
+                        key=lambda a: -rank_of[a])[:k]
+
+        longs = list(keep_l)
+        for a in order:                                   # fill from the top
+            if len(longs) >= k:
+                break
+            if a not in longs and a not in keep_s:
+                longs.append(a)
+        shorts = list(keep_s)
+        for a in reversed(order):                         # fill from the bottom
+            if len(shorts) >= k:
+                break
+            if a not in shorts and a not in longs:
+                shorts.append(a)
 
         w = pd.Series(0.0, index=assets)
         w[longs] = 0.5 / k                          # 0.5 gross per leg, dollar-neutral
@@ -167,10 +186,13 @@ def report(df, k, rebalance_every, cost_per_side):
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--k", type=int, default=3)
-    ap.add_argument("--buffer", type=int, default=0, help="Rank hysteresis to cut turnover")
+    ap.add_argument("--exit-band", type=int, default=0,
+                    help="Band hysteresis: exit only when outside top/bottom K+band")
+    ap.add_argument("--smooth", type=int, default=1,
+                    help="Rank on trailing mean of last N funding events (9 = 3 days)")
     ap.add_argument("--rebalance-every", type=int, default=1, help="In 8h events (3=daily)")
     ap.add_argument("--cost-per-side", type=float, default=0.0008,
-                    help="Taker fee + slippage per side on traded notional")
+                    help="Fee + slippage per side on traded notional (taker ~0.0008, maker ~0.0003)")
     ap.add_argument("--tag", default=None)
     args = ap.parse_args()
 
@@ -178,7 +200,7 @@ def main():
     print(f"Panel: {fund.shape[0]} events × {fund.shape[1]} assets "
           f"({fund.index[0]} .. {fund.index[-1]})", flush=True)
 
-    df = run(fund, close, k=args.k, buffer=args.buffer,
+    df = run(fund, close, k=args.k, exit_band=args.exit_band, smooth=args.smooth,
              rebalance_every=args.rebalance_every, cost_per_side=args.cost_per_side)
     summary = report(df, args.k, args.rebalance_every, args.cost_per_side)
 
