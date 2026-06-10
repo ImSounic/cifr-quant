@@ -15,12 +15,23 @@ CIFR-QUANT is a systematic-trading research project building toward a quant firm
 
 ---
 
-## Current Status: Phase 2A — Derivatives Data Layer (starting)
+## Current Status: Phase 2 — FIRST SIGNAL PASSED THE GATE (June 10, 2026)
 
-Next concrete steps (see roadmap below):
-1. Build `scripts/fetch_derivs.py` — historical funding rates + open interest (+ liquidations where available) for the 15 tier-1/2 crypto assets from Binance.
-2. Build `scripts/carry_skill.py` — IC/t-stat diagnostic for funding-rate carry, same statistical standard as `forecast_skill.py` (|t| > 2, multi-window).
-3. Only signals that pass diagnostics graduate to the pluggable backtest engine.
+**Funding-rate carry is real.** Phase 2A (data) + 2B (diagnostic) complete in one day:
+- `scripts/fetch_derivs.py` fetched funding (4.9k events/asset since 2022), perp 1h
+  klines (39k rows/asset), OI (30d, accumulating) for 14 assets (MATIC delisted) →
+  `data/raw/derivs/` on HPC.
+- `scripts/carry_skill.py`: **8h cross-sectional IC −0.020, t=−4.83 pooled;
+  negative in ALL 5 years (2022-26), |t|≥2.2 in 4/5, strongest in 2026 (−2.79 —
+  not decaying). Per-asset sign consistency 93%.** First |t|>2 of the project
+  (Kronos's best was +0.76). Tradeable horizon = 8h (1d unstable, 3d noise).
+- Harvest leg: majors yield +5-8% ann. unconditionally BUT regime-dependent
+  (+11.6% 2024, negative 2022/2026) → conditional/cross-sectional designs only.
+  BNB structurally negative funding (−5.8%/yr, shorts pay) — anomaly, investigate.
+- **Earned backtest built**: `scripts/backtest_carry.py` — XS long-low/short-high
+  funding, dollar-neutral, funding CASHFLOWS in PnL (shorts collect what they
+  predict against — paid twice), costs on turnover only, hysteresis buffer,
+  per-year Sharpe + price-vs-funding decomposition. AWAITING FIRST RUN.
 
 ---
 
@@ -90,8 +101,8 @@ Finetune Kronos (foundation model for candlesticks) per market → ensemble MC-p
 
 ## What's Next (v2 Roadmap — In Order)
 
-1. ⏳ **Phase 2A — Derivatives data layer**: `scripts/fetch_derivs.py` — historical funding rates (Binance `fapi/v1/fundingRate`, free, years of 8h-interval history), open interest history, liquidations where available, for the 15 tier-1/2 assets. Same pattern as `scripts/fetch_universe.py`. Runs on HPC.
-2. ⏳ **Phase 2B — Carry signal diagnostic**: `scripts/carry_skill.py` — does high funding predict negative forward perp returns (and vice versa)? IC/t-stat, multi-window, per-asset + cross-sectional. **No backtest until |t| > 2.**
+1. ✅ **Phase 2A — Derivatives data layer**: `scripts/fetch_derivs.py` done June 10; 14 assets of funding / perp-1h / OI in `data/raw/derivs/` (HPC).
+2. ✅ **Phase 2B — Carry signal diagnostic**: **GATE PASSED** — 8h XS t=−4.83, negative all 5 years, |t|≥2.2 in 4/5. Earned backtest built (`scripts/backtest_carry.py`), first run pending.
 3. ⏳ **Phase 2C — More signal candidates through the same gauntlet**: OI-change, liquidation cascades, slow (weekly) cross-sectional momentum. Simple models only (rankings, z-scores, GBM at most).
 4. ⏳ **Phase 2D — Portfolio the survivors**: validated signals → pluggable engine (`--strategy` plug-ins) with **vol-targeted sizing** (vol persistence IC 0.61 is free and proven — it's the risk layer, not the alpha).
 5. ⏳ **Phase 3 — LLM as data source** (the v1 vision, pointed the right way): text→features (news/sentiment/events) → same IC diagnostics. NOT a strategy picker.
