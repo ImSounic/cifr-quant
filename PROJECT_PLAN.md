@@ -1,11 +1,122 @@
 # CIFR-QUANT: Project Plan
 
-## Overview
+## Overview (v2 — June 10, 2026)
 
-CIFR-QUANT is a dual-market multi-asset algorithmic trading system built on top of **Kronos**, the first open-source foundation model for financial candlestick (K-line) data. The system trades across two decorrelated markets — **Crypto** (15-25 assets, 15m, Binance) and **Commodities** (6-8 assets, 4h, TwelveData) — using transfer learning from market-representative finetuned checkpoints (BTC→all crypto, XAU→all commodities). Combines ensemble probabilistic forecasting with CQR-calibrated risk parity position sizing and an LLM strategy layer.
+CIFR-QUANT is a systematic-trading research project building toward a quant firm. It is now a **signal factory**: a validated research pipeline (skill diagnostics → pluggable walk-forward backtest → portfolio construction) pointed at **information-bearing market data** — starting with crypto derivatives data (funding rates, open interest, liquidations, basis) where documented, capacity-constrained edges exist that are accessible at small scale.
 
-**Foundation Model**: [Kronos](https://github.com/shiyu-coder/Kronos) (Tsinghua University, AAAI 2026)
-**License**: Kronos is MIT licensed. CIFR-QUANT is proprietary (no license).
+**v1 of this project (June 2025 – June 10, 2026) was built around the Kronos financial foundation model and was rigorously falsified** — see "How the Project Changed" below. The v1 plan is preserved in full further down this document as the historical record; its infrastructure survives, its thesis does not.
+
+**License**: CIFR-QUANT is proprietary (no license). Kronos (vendored, retired from the signal path) is MIT.
+
+---
+
+## How the Project Changed (June 10, 2026): v1 → v2
+
+### What v1 believed
+1. A foundation model pretrained on 12B+ candles (Kronos, 102M params), finetuned per market, could forecast price direction well enough to trade.
+2. Ensemble MC paths + CQR calibration would turn those forecasts into tradeable bands (SL/TP, confidence, sizing).
+3. An **LLM strategy layer** on top would read the forecasts and adaptively pick/tune strategies as market conditions changed.
+
+### What we measured (June 8–10, the falsification week)
+Every component was built and tested end-to-end, then the signal itself was isolated and measured with proper statistics. The full evidence chain lives in PROJECT_STATE.md ("Phase 1 Post-Mortem"). The headline results:
+
+| Test | Result |
+|---|---|
+| 90-day walk-forward backtest, directional strategy | crypto −23.7%; commodity +14.1% — but the asymmetry was the clue |
+| Strategy A/B sweep (regime-gated, mean-reversion, off forecast cache) | every variant negative; regime gate killed the only profitable book |
+| ATR-exit sweep, symmetric RR 1.0 | crypto win rate **48.9% = sub-coinflip** — the smoking gun |
+| Directional skill, time-series, every horizon h=1..48 | IC ≈ 0 everywhere, both markets (n=2516 / n=384) |
+| Cross-sectional ranking skill (basis of market-neutral) | t-stat +0.76 (crypto) / −0.01 (commodity) — not significant |
+| Model confidence (MC-path agreement) | degenerate: 82% pinned >0.80, that bucket = coinflip |
+| Volatility forecasting (quantile spread vs realised vol) | IC +0.34/+0.44 — **loses to naive persistence (+0.61/+0.46)** |
+| The commodity +14% | **beta, not alpha**: coinflip hit rate + trending energy quarter |
+
+**Verdict: Kronos on OHLCV adds zero extractable information beyond trailing realised volatility.** Not a tuning failure — strategy structure, exits, gating, confidence, horizon and cross-section were all tested.
+
+### The three lessons that define v2
+1. **Edge lives in the inputs, not the model.** Kronos already trained on huge price data and has nothing — OHLCV is the most-arbitraged dataset on earth. Building a bigger in-house model on the same candles would learn the same nothing at 1000× the cost. Change the data, not the architecture.
+2. **Information cannot be created downstream.** The v1 LLM strategy layer consumed Kronos's output; intelligence applied to a coinflip is still a coinflip. (The strategy sweep WAS that layer's job, run manually — every variant lost.) An LLM belongs **upstream**, where information enters: converting text (news, events, sentiment) into features. And "adaptively changing strategies with the market" without t-stat discipline is an overfitting machine — LLMs always have a confident narrative.
+3. **The factory is the firm.** What survived v1 — forecast cache, pluggable strategy engine, IC/t-stat diagnostics, CQR, cost-aware walk-forward, HPC workflow — is precisely the machine that killed the bad thesis in days instead of with real money. A quant firm = (1) that factory, (2) a portfolio of small validated uncorrelated edges, (3) execution & risk. We have (1); v2 builds (2), then (3).
+
+### What is retained vs retired
+| Asset | Status |
+|---|---|
+| Skill diagnostics (`forecast_skill`, `horizon_skill`, `vol_skill` patterns) | **Core of v2** — every new signal goes through them first |
+| Pluggable backtest engine + forecast/signal cache | **Core of v2** — signals plug in as strategies |
+| CQR / uncertainty quantification | Retained (works as designed) |
+| Vol persistence finding (IC 0.61 for free) | Retained as the **risk/sizing layer** (vol targeting), not as alpha |
+| Regime indicators (`src/regime/`) | Retained for vol sizing; Hurst+ADX gate retired |
+| Kronos ensembles, finetuned checkpoints, batched inference | **Retired from signal path** (kept on disk; batched-inference technique reusable) |
+| LLM strategy layer v1 (`src/strategy/` as strategy picker) | **Cancelled as designed**; reborn in Phase 3 as text→feature extractor |
+| Meta-labeling plan | Cancelled — nothing upstream to filter |
+
+---
+
+## The Plan Now (v2): Signal Factory
+
+### Architecture
+
+```
+INFORMATION-BEARING INPUTS                    (Phase 2A / 3)
+  funding rates · open interest · liquidations · basis · [later: text→LLM features]
+        │
+        ▼
+SIGNAL CANDIDATES                             (Phase 2B/2C)
+  funding carry · OI-change · liquidation cascades · slow xs-momentum
+        │
+        ▼
+THE GAUNTLET — skill diagnostics FIRST        (existing infra)
+  IC / rank-IC / t-stat / multi-window / per-asset & cross-sectional
+  RULE: |t| > 2 across windows or the signal dies here. No backtest before this.
+        │
+        ▼
+PORTFOLIO OF SURVIVORS                        (Phase 2D, existing engine)
+  pluggable strategies · VOL-TARGETED sizing (persistence IC 0.61, free)
+  cost models · drawdown halt · deflated Sharpe across all trials
+        │
+        ▼
+PAPER TRADING → LIVE                          (Phase 4)
+  Binance testnet loop · execution data feeds back into research
+```
+
+### Phase 2A — Derivatives data layer (NOW)
+- `scripts/fetch_derivs.py`: historical **funding rates** (Binance `fapi/v1/fundingRate`, free, 8h interval, years of history), **open interest** history, liquidation data where retrievable, for the 15 tier-1/2 crypto assets. Same pattern as `scripts/fetch_universe.py`; runs on HPC; saves to `data/raw/derivs/`.
+- Spot–perp **basis** computed from existing spot candles + perp marks.
+
+### Phase 2B — First signal: funding-rate carry
+- Best-documented edge in crypto; structurally persistent (longs pay shorts in bull crowding); capacity-constrained (too small for big funds) — being small is the advantage.
+- `scripts/carry_skill.py`: does funding level/percentile predict forward perp returns (negatively)? Time-series IC per asset + cross-sectional rank IC (high-funding vs low-funding assets), t-stats, multiple windows.
+- Also evaluate the **market-neutral harvest** variant (short perp / long spot collects funding directly — closer to arbitrage than forecasting).
+
+### Phase 2C — Signal candidates 2..N through the same gauntlet
+- OI-change + funding (crowding/squeeze setups), liquidation-cascade reversion, slow (weekly) cross-sectional momentum on the 15-asset universe.
+- Models stay simple: z-scores, rankings, gradient boosting at most. Complexity is earned, not assumed.
+
+### Phase 2D — Portfolio construction
+- Survivors become strategies in `src/backtest/` (the pluggable engine, unchanged).
+- **Vol-targeted sizing** as default (replaces inverse-CQR-width), drawdown halt, per-market costs.
+- Multi-window walk-forward + deflated Sharpe over the *count of everything tried*.
+
+### Phase 3 — LLM as a data source (the v1 idea, pointed the right way)
+- Text → features: news, Fed/macro events, protocol incidents, sentiment → scored features → the same gauntlet.
+- Much later, optionally: simple regime-based allocation across *validated* signals (rules first; an LLM allocator only if it beats rules out-of-sample).
+
+### Phase 4 — Paper trading
+- Binance testnet execution loop for the surviving portfolio; live-vs-backtest divergence tracking; slippage/fill data becomes research input.
+
+### Methodology rules (the constitution — violations are how v1 almost fooled us)
+1. **Diagnostics before backtests.** A signal earns a backtest by passing IC/t-stat tests, never the reverse.
+2. **Count every trial.** Deflated Sharpe / multiple-testing haircut on anything promising.
+3. **Multi-window always.** No conclusions from a single 90-day window (the +14% trap).
+4. **Decouple signal from strategy** when results confuse — hit rate + signed edge separates skill from drift.
+5. **Final test window touched exactly once.**
+6. **Realistic targets**: portfolio Sharpe 1.0–1.5 from several small edges = excellent. No single killer model exists.
+
+---
+
+# ⚠️ EVERYTHING BELOW THIS LINE IS THE v1 PLAN (HISTORICAL RECORD — SUPERSEDED June 10, 2026)
+
+Kept intact for reference: the Kronos architecture, finetuning pipeline, CQR method, and v1 phase log. The thesis it encodes was falsified; see "How the Project Changed" above.
 
 ---
 
@@ -759,4 +870,4 @@ For posterity, these are the 7 issues caught during review before implementation
 
 ---
 
-*Last updated: June 7, 2026 (rev 4 — dual-market multi-asset architecture, all finetuning complete, ensemble eval complete, EUR/Forex dropped)*
+*Last updated: June 10, 2026 (rev 5 — v2 pivot: Kronos directional thesis falsified with full evidence chain; project redefined as a signal factory on derivatives/alt data. v1 plan preserved above as historical record.)*

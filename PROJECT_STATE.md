@@ -1,342 +1,182 @@
 # CIFR-QUANT: Project State
 
 > **Purpose**: Cross-session memory for Claude. Read this file at the start of every new session.
-> **Last updated**: June 8, 2026
+> **Last updated**: June 10, 2026
 
 ---
 
 ## Quick Summary
 
-Dual-market multi-asset algorithmic trading system using the Kronos financial foundation model (102M params, AAAI 2026). Two markets: **Crypto** (15-25 assets via Binance, 15m) and **Commodities** (6-8 assets via TwelveData, 4h). BTC-finetuned checkpoint transfers to all crypto; XAU-finetuned checkpoint transfers to all commodities. Ensemble predictions + CQR-calibrated risk parity position sizing. User is Raj (s3702111), UTwente student, building a quant firm.
+CIFR-QUANT is a systematic-trading research project building toward a quant firm. User is Raj (s3702111), UTwente student. Works across HP Windows laptop (dev) + UTwente HPC (all heavy compute).
+
+**The project pivoted on June 10, 2026.** Phase 1 — directional trading on the Kronos financial foundation model (102M, OHLCV candles) — was completed and **rigorously falsified**: the model has no extractable edge of any kind (directional, cross-sectional, or volatility-beyond-persistence) on crypto 15m or commodity 4h data. See "Phase 1 Post-Mortem" below for the full evidence chain.
+
+**Current direction (v2): the Signal Factory.** Keep the validated research pipeline (forecast cache, pluggable strategy engine, IC/t-stat diagnostics, CQR, walk-forward backtest, HPC workflow) and point it at **information-bearing inputs** instead of price candles: funding rates, open interest, liquidations, basis — starting with funding-rate carry, the best-documented edge in crypto. Kronos is retired from the signal path. The LLM layer is repositioned from "strategy picker" (information-free) to a future **text→feature data source**. Detailed plan in PROJECT_PLAN.md ("The Plan Now (v2)").
 
 ---
 
-## Current Status: Phase 4 — CQR Calibration Running, BTC v2 Complete
+## Current Status: Phase 2A — Derivatives Data Layer (starting)
 
-### Strategic Pivot (June 6-7, 2026)
-
-Pivoted from **3-market × 1-asset** (BTC, EUR, XAU) to **2-market × many-assets** (Crypto + Commodities). Rationale:
-- Kronos pre-training data heavily upweighted crypto (45 exchanges)
-- XAU ensemble showed strong IC (+0.393), validating commodity finetuning transfer
-- EUR/Forex dropped — no volume data, weekend gaps, weaker model fit
-- Crypto × Commodities are decorrelated (24/7 momentum vs macro-driven)
-- Breadth: 25-35 assets vs 3 dramatically improves portfolio IR via Grinold's Law
-
-### All Finetuning Complete
-
-| Market | Version | Val Loss | Time | Status |
-|--------|---------|----------|------|--------|
-| BTC/USDT | v1 (tok+pred) | tok: 0.0027 | tok: 2.6h, pred: ~2h | ✅ Complete |
-| BTC/USDT | v2 (seed=137) | pred: 2.6672 | 9.6h (tok+pred) | ✅ Complete |
-| EUR/USD | v1 (seed=42) | 1.6098 | 1h12m | ✅ Complete |
-| EUR/USD | v2 (seed=137) | 1.5521 | 67min | ✅ Complete |
-| XAU/USD | v1 | 0.9054 | 1h39m | ✅ Complete (overfitted) |
-| XAU/USD | v2 (anti-overfit) | 1.2316 | 26min | ✅ Complete |
-
-### Multi-Asset Data Fetched (June 8, 2026)
-
-| Market | Assets | Candles Each | Source |
-|--------|--------|-------------|--------|
-| Crypto (15m) | 15 assets (tier 1+2) | ~155k (4.5 years) | Binance |
-| Commodities (4h) | XAU: 9,584 | 6 years | TwelveData |
-| Commodities (4h) | XAG, XPT, WTI, Brent, NatGas, Copper | ~2,800 each (2 years) | yfinance futures |
-
-Data saved to `data/raw/crypto/` and `data/raw/commodity/`.
-
-### CQR Calibration (June 8, 2026)
-
-SLURM job 510442 submitted on L40S. Script: `scripts/calibrate_cqr_multi.py`. Runs ensemble predictions across all 21 assets with 50 MC paths, computes conformity scores for 90% coverage. Results save to `results/cqr/cqr_calibrations.json`.
-
-**CHECK THIS FIRST** in next session — if `results/cqr/cqr_calibrations.json` is empty `{}`, the job failed. See Common Pitfalls below.
-
-### Ensemble Evaluation Complete (50 windows, bootstrap CIs)
-
-| Market | Best Model | Key Metric | Value |
-|--------|-----------|------------|-------|
-| XAU/USD | ensemble_full (ZS+v1+v2) | IC | **+0.393** |
-| EUR/USD | ensemble_eq / ensemble_full | Dir. Accuracy | **60%** |
-| BTC/USDT | finetuned_v1 | RMSE improvement | Yes, but IC/DA flat |
-
-**Key finding**: XAU ensemble_full is the strongest signal. BTC v2 now complete (val_loss=2.6672) — crypto ensemble now has 3 models (ZS + BTC v1 + BTC v2).
+Next concrete steps (see roadmap below):
+1. Build `scripts/fetch_derivs.py` — historical funding rates + open interest (+ liquidations where available) for the 15 tier-1/2 crypto assets from Binance.
+2. Build `scripts/carry_skill.py` — IC/t-stat diagnostic for funding-rate carry, same statistical standard as `forecast_skill.py` (|t| > 2, multi-window).
+3. Only signals that pass diagnostics graduate to the pluggable backtest engine.
 
 ---
 
-## Dual-Market Multi-Asset Architecture
+## Phase 1 Post-Mortem: The Kronos Thesis, Tested and Falsified (June 6–10, 2026)
 
-### Market Universes
+### The original thesis
+Finetune Kronos (foundation model for candlesticks) per market → ensemble MC-path forecasts → CQR-calibrated bands → directional trades sized by risk parity → an LLM layer on top picking/adapting strategies with market conditions. Two markets: crypto (15 assets, 15m, Binance) and commodities (6 assets, 4h, TwelveData/yfinance).
 
-**Crypto (Binance, 15m candles)**:
-- Tier 1 (5 majors): BTC, ETH, BNB, SOL, XRP
-- Tier 2 (10 large caps): ADA, AVAX, DOGE, DOT, LINK, MATIC, UNI, ATOM, LTC, NEAR
-- Tier 3 (10 mid caps): APT, ARB, FIL, INJ, OP, SUI, TIA, SEI, AAVE, MKR
-- Default: Tier 1+2 (15 assets). All use BTC-finetuned + zero-shot ensemble.
+### What was built (all of it works and is reusable)
+- Finetuned checkpoints: BTC v1/v2, XAU v1/v2 (EUR dropped earlier). Ensembles = zero-shot + 2 finetunes per market (`src/model/build.py`).
+- Batched MC path generation (`src/model/batched_inference.py`) — ~20x effective speedup on L40S vs the per-path loop (Kronos's `sample_count=N` averages paths; we replicate the AR loop without averaging).
+- CQR calibration for all 21 assets, 90% target → 91-92.5% achieved (`results/cqr/cqr_calibrations.json`).
+- **Forecast cache** (`src/model/forecast_cache.py` + `scripts/build_forecast_cache.py`): run the GPU ensemble ONCE over the walk-forward grid, dump per-(asset, rebalance) forecasts to `results/forecasts/` → all strategy testing becomes CPU-only and instant. This is the single most valuable infra piece.
+- **Pluggable strategy engine** (`src/backtest/portfolio_engine.py` + `strategy_api.py` + `strategies.py` + `sizing.py` + `grid.py`): Strategy/Sizer/RegimeClassifier injected; baseline proven logically equivalent to the original inline engine (regression test `scripts/test_strategy_equivalence.py`).
+- **Skill diagnostics** (`scripts/forecast_skill.py`, `horizon_skill.py`, `vol_skill.py`): IC, rank IC, t-stats, hit rates, confidence stratification, horizon curves, vol-vs-persistence baselines.
+- Regime classifier (Hurst+ADX, `src/regime/`) — built, tested, found net-negative (below).
 
-**Commodities (TwelveData, 4h candles)**:
-- Precious: XAU/USD, XAG/USD, XPT/USD
-- Energy: WTI, Brent, Natural Gas
-- Industrial: Copper
-- All use XAU-finetuned v1+v2 + zero-shot ensemble (3 models).
+### The evidence chain (chronological — every escape hatch tested and closed)
 
-### Transfer Learning Strategy
+1. **Backtest #1 (job 511139, June 9)** — single directional strategy, 90-day walk-forward:
+   crypto **−23.4%** (Sharpe −3.28), commodity **+16.0%** (Sharpe 4.36), combined −5.1%.
+   Suspicious asymmetry → investigate rather than celebrate commodity.
 
-BTC finetuning captures crypto-specific patterns (momentum cascades, leverage liquidations, 24/7 microstructure) → transfers to all crypto.
-XAU finetuning captures commodity macro dynamics (real rates, central bank flows, risk-off) → transfers to all commodities.
+2. **Strategy A/B sweep off the forecast cache** (baseline reproduced: −23.7%/+14.1% → refactor faithful):
+   | Strategy | Crypto | Commodity | Key telltale |
+   |---|---|---|---|
+   | directional (baseline) | −23.7% | +14.1% | crypto exit mix 0 tp / 31 sl / **2341 timeout** |
+   | regime_gated_trend (strict & relaxed) | −2 to −6% | **0 trades** | Hurst never labels trending energy "trend" |
+   | mean_reversion (ATR exits) | −6.2% | +1.8% | exits actually fire (106 tp/195 sl/25 to) |
+   - Finding A: **CQR band is inert as SL/TP** (calibrated for coverage, far too wide intrabar) — directional was a pure 12h horizon bet.
+   - Finding B: **Hurst+ADX regime gating is net-negative** — killed the only profitable book.
 
-### Portfolio Orchestrator (`src/portfolio/orchestrator.py`)
+3. **ATR-exit sweep (`directional_atr`, RR 1.0/1.5/2.0)** — "winning direction + working exits":
+   crypto −26% at every RR; **atr_10 (symmetric RR) win rate 48.9% = sub-coinflip — the smoking gun**;
+   commodity fell +14% → −5% (tight stops cut trend winners → its profit was drift-riding, not skill).
 
-Core engine: `PortfolioOrchestrator.build()` loads shared zero-shot + market-specific finetuned models. Per-asset: 50 Monte Carlo paths → CQR-calibrated intervals → directional confidence + stop/take-profit → risk parity sizing (1/interval_width). Max 10% per position.
+4. **forecast_skill.py (decouple forecaster from strategy)** —
+   crypto n=2516: hit 50.8% (0.8σ), pooled IC +0.004 (noise floor 0.020), signed edge negative;
+   commodity n=384: hit 50.3%, IC −0.022. **Confidence degenerate**: 82% of forecasts pinned >0.80 conf, that bucket = coinflip.
+   **Cross-sectional rank IC** (can it pick relative winners?): crypto mean +0.019, **t = +0.76** (NS); commodity t = −0.01.
+   → Commodity's +14% was **beta** (coinflip direction + big asymmetric trend moves), not alpha.
 
-### Key Files Created for Multi-Asset
+5. **horizon_skill.py (GPU, jobs 511874 + 511916)** — IC/hit at EVERY horizon step:
+   crypto h=1..48: IC ∈ [−0.05, +0.04] around zero, hit mostly <50%. No short-horizon skill hiding.
+   commodity with proper n=384: h=1 IC +0.053 / hit 49.0% (the n=24 "IC +0.29 flicker" was sampling noise).
 
-| File | Purpose |
-|------|---------|
-| `configs/crypto_universe.py` | 3-tier crypto asset definitions, costs, MarketConfig builder |
-| `configs/commodity_universe.py` | Precious/energy/industrial definitions, costs, MarketConfig builder |
-| `src/portfolio/__init__.py` | Portfolio module init |
-| `src/portfolio/orchestrator.py` | PortfolioOrchestrator: multi-asset prediction + risk parity allocation |
-| `scripts/fetch_universe.py` | Multi-asset data fetcher (Binance for crypto, TwelveData for commodities) |
+6. **vol_skill.py** — last hypothesis: maybe it predicts volatility.
+   pred_width vs realised vol: crypto IC +0.34, commodity +0.44 — **but naive persistence (trailing realised vol) scores +0.61 / +0.46**. The model's vol forecast is a degraded echo of recent vol. (The cross-sectional vol t=25 is the trivial DOGE-is-always-more-volatile-than-BTC ranking.)
 
-### Critical Kronos Bug
+### Final verdict table
+| Capability | Result |
+|---|---|
+| Directional, time-series, any horizon, both markets | **none** |
+| Cross-sectional ranking | **none** (t = 0.76 / −0.01) |
+| Volatility forecasting | **≤ naive persistence** (which is free: IC 0.61) |
+| CQR uncertainty calibration | works — but only because vol persists |
 
-`predict(sample_count=N)` **AVERAGES** N paths into one DataFrame. Must call `predict(sample_count=1)` N times for individual trajectories needed for quantile analysis.
+**Kronos on OHLCV alone adds zero extractable information beyond trailing realised vol.** Not a tuning failure: strategy structure, exits, gating, confidence, horizon, and cross-section were all tested with proper statistics.
 
-### Checkpoint Path Issue (Fixed)
+### Why it failed (the lesson that defines v2)
+- **Edge lives in the inputs, not the model.** Kronos was already trained on 12B+ candles from 45 exchanges and still has nothing — OHLCV is the most-arbitraged dataset on earth. A bigger in-house model on the same data would learn the same nothing.
+- **Information cannot be created downstream.** The planned LLM strategy layer sat downstream of Kronos's output; an LLM reasoning about a coinflip is still betting on a coinflip. (We effectively ran that layer's job manually via the strategy sweep — every variant lost.) "Keep changing strategies with the market" without t-stat discipline = overfitting machine.
+- **The +14% trap**: a beautiful single-window backtest (Sharpe 4.36!) that was pure regime beta. Without the skill diagnostics we'd have shipped it.
+- **What a quant firm actually is**: (1) a signal factory that cheaply kills bad hypotheses ← **built and proven**, (2) a portfolio of small validated uncorrelated edges ← have zero, this is the gap, (3) execution + risk ← backtest half built.
 
-Training saves to `Kronos/checkpoints/` (because script cd's into `Kronos/finetune_csv/`). Loader expects `checkpoints/`. Fixed with symlink on HPC: `ln -s Kronos/checkpoints checkpoints`.
+---
+
+## What's Next (v2 Roadmap — In Order)
+
+1. ⏳ **Phase 2A — Derivatives data layer**: `scripts/fetch_derivs.py` — historical funding rates (Binance `fapi/v1/fundingRate`, free, years of 8h-interval history), open interest history, liquidations where available, for the 15 tier-1/2 assets. Same pattern as `scripts/fetch_universe.py`. Runs on HPC.
+2. ⏳ **Phase 2B — Carry signal diagnostic**: `scripts/carry_skill.py` — does high funding predict negative forward perp returns (and vice versa)? IC/t-stat, multi-window, per-asset + cross-sectional. **No backtest until |t| > 2.**
+3. ⏳ **Phase 2C — More signal candidates through the same gauntlet**: OI-change, liquidation cascades, slow (weekly) cross-sectional momentum. Simple models only (rankings, z-scores, GBM at most).
+4. ⏳ **Phase 2D — Portfolio the survivors**: validated signals → pluggable engine (`--strategy` plug-ins) with **vol-targeted sizing** (vol persistence IC 0.61 is free and proven — it's the risk layer, not the alpha).
+5. ⏳ **Phase 3 — LLM as data source** (the v1 vision, pointed the right way): text→features (news/sentiment/events) → same IC diagnostics. NOT a strategy picker.
+6. ⏳ **Phase 4 — Paper trading loop** (Binance testnet) — makes it a firm, generates execution data.
+
+**Methodology rules (non-negotiable, learned the hard way):**
+- A signal must pass IC/t-stat diagnostics (|t|>2) BEFORE any backtest is run on it.
+- Count every variant tried; deflated Sharpe / multiple-testing haircut on anything that looks good.
+- Multi-window walk-forward, never a single 90-day window. Final test window touched once.
+- Costs modeled from day one. Vol-targeted sizing as default risk layer.
+
+### Status of old roadmap items
+- ~~Regime detection~~ — built, tested, net-negative as a gate on a zero signal. `src/regime/` kept (indicators reusable for vol sizing).
+- ~~Meta-labeling (task #9)~~ — cancelled: nothing upstream to filter.
+- ~~LLM strategy layer (v1 design)~~ — cancelled as designed; repositioned to Phase 3 text-features.
+- ~~Final Kronos test-set evaluation~~ — moot; verdict already conclusive at proper significance.
 
 ---
 
 ## HPC Environment
 
 - **Cluster**: UTwente SLURM, head nodes `hpc-head1/2.ewi.utwente.nl`
-- **Best GPUs in main-gpu**: Lovelace (L40S, 48GB) on hpc-node01-18
-- **Conda env**: `trade` (has torch, transformers, etc.)
-- **HuggingFace**: Model cached on head node, jobs use `HF_HUB_OFFLINE=1`
-- **Conda activation**: `source $(conda info --base)/etc/profile.d/conda.sh && conda activate trade` (the direct path doesn't work)
-- **QOS limit**: May restrict concurrent GPU jobs. Submit BTC first if blocked.
+- **Best GPUs in main-gpu**: Lovelace (L40S/L40, 48GB) on hpc-node01-18, `--gres=gpu:lovelace:1`
+- **Conda env**: `trade`. Activate: `source $(conda info --base)/etc/profile.d/conda.sh && conda activate trade` (direct path doesn't work)
+- **HuggingFace**: cached on head node; jobs use `HF_HUB_OFFLINE=1` (compute nodes offline)
+- **SLURM sizing**: 8 CPU / 32G is right-sized and backfills fast; 32 CPU / 128G blocks backfill for ~days
+- **Raj runs all SSH/sbatch/git commands himself** — provide commands, he executes & pastes output
+- **Commits**: Raj's credentials only, NEVER any Claude/AI attribution
 
 ---
 
 ## Development Environment
 
-Local dev/inference/backtest runs on the dev machine; all training/calibration runs on the HPC.
+### HP Windows 11 laptop (dev machine; small checks/tests ONLY — all real workloads on HPC)
 
-### HP Windows 11 laptop (current dev machine, set up June 8, 2026)
+- **Repo**: `W:\cifr-quant` (W: is a `subst` of `C:\Work Drive`)
+- **Python env**: venv `mlenv` at `C:\Work Drive\envs\mlenv`; activate by typing `mlenv` in PowerShell. Python 3.12.10
+- **GPU**: RTX PRO 1000 (Blackwell), torch cu128, CUDA works
+- **Deps added for project**: `ccxt yfinance twelvedata anthropic python-dotenv` (do NOT install vectorbt/mapie — would downgrade shared numpy/pandas)
+- **Kronos**: gitlink (mode 160000, commit `67b630e`), **no `.gitmodules`** → fresh clone leaves `Kronos/` empty. Restore: `git clone https://github.com/shiyu-coder/Kronos.git Kronos && cd Kronos && git checkout 67b630e`. **Edits inside `Kronos/` do NOT propagate via git — all new code goes in tracked `src/`.**
+- **Not present locally** (gitignored, live on HPC): `data/`, `checkpoints/`, `results/`
+- `PYTHONPATH` = repo root + `Kronos` when running locally
 
-- **Repo**: `W:\cifr-quant` (W: is a `subst` of `C:\Work Drive`).
-- **Python env**: system-wide venv `mlenv` at `C:\Work Drive\envs\mlenv`. Activate in PowerShell by typing `mlenv` (a profile function running `Activate.ps1`). Python 3.12.10.
-- **GPU**: NVIDIA RTX PRO 1000 (Blackwell) Laptop GPU — `torch` cu128 build, `cuda.is_available() == True`. Local GPU inference works.
-- **Deps**: `mlenv` ships torch/transformers/pandas/numpy/scipy/einops/numba/matplotlib/plotly/wandb/tqdm. Added for this project: `ccxt yfinance twelvedata anthropic python-dotenv`. **`vectorbt` and `mapie` are NOT installed and NOT needed** — the backtest engine (`src/backtest/`) and CQR (`src/risk/cqr.py`) are custom implementations; installing them would risk downgrading numpy 2.4.3 / pandas 3.0.1 in the shared venv.
-- **Kronos**: tracked as a gitlink (mode 160000, commit `67b630e`) with **no `.gitmodules`**, so a fresh clone leaves `Kronos/` empty. Restore with: `git clone https://github.com/shiyu-coder/Kronos.git Kronos && cd Kronos && git checkout 67b630e`.
-- **Run commands** with `PYTHONPATH` set to repo root + `Kronos`, e.g. PowerShell: `$env:PYTHONPATH="W:\cifr-quant;W:\cifr-quant\Kronos"`.
-- **Not present locally** (gitignored, live on HPC): `data/` and `checkpoints/`. Sync from HPC before any local inference/backtest. Kronos-base/Tokenizer-base weights download from HuggingFace on first use (laptop has internet — do NOT set `HF_HUB_OFFLINE` locally).
-
-### New-laptop setup checklist
-
-1. `git clone https://github.com/ImSounic/cifr-quant.git`
-2. Restore Kronos (see clone command above).
-3. Activate `mlenv`; `pip install ccxt yfinance twelvedata anthropic python-dotenv` (rest already in mlenv).
-4. Sync `data/` and `checkpoints/` from HPC (`~/cifr-quant/`) if running locally.
-5. Create `.env` with `TWELVEDATA_API_KEY`, `ANTHROPIC_API_KEY` (see PROJECT_PLAN Environment Variables).
+### Training/compute: UTwente HPC
+- Checkpoints at `~/cifr-quant/Kronos/checkpoints/`, symlinked to `~/cifr-quant/checkpoints/`
 
 ---
 
-## File Map
+## File Map (updated June 10, 2026)
 
-### Configs
-
-| File | Purpose |
-|------|---------|
-| `finetune/config_btc.yaml` | BTC: batch=128, tok=20 epochs, pred=10, LR=5e-6, skip_existing=true |
-| `finetune/config_eur.yaml` | EUR v1: batch=32, tok=30, pred=15, LR=3e-6, seed=42 |
-| `finetune/config_eur_v2.yaml` | EUR v2: batch=64, same hyperparams, seed=137 |
-| `finetune/config_xau.yaml` | XAU v1: batch=32, tok=50, pred=20 — **OVERFITTED** |
-| `finetune/config_xau_v2.yaml` | XAU v2: batch=64, tok=15, pred=5, LR halved, decay=0.15 |
-| `configs/base_config.py` | `CHECKPOINTS_DIR = PROJECT_ROOT / "checkpoints"` |
-
-### SLURM Scripts
-
-| File | Target GPU | Time Limit |
-|------|-----------|------------|
-| `slurm/finetune_btc.sh` | Ampere (A40) | 20h |
-| `slurm/finetune_eur.sh` | A40 (ampere) — **outdated** | 8h |
-| `slurm/finetune_eur_v2.sh` | Ampere (A40) | 8h |
-| `slurm/finetune_xau.sh` | A40 (ampere) — **outdated** | 8h |
-| `slurm/finetune_xau_v2.sh` | Ampere (A40) | 8h |
-| `slurm/eval_ensemble.sh` | Ampere (A40) | 4h |
-
-### Evaluation Scripts
+### v2-relevant infrastructure (the keepers)
 
 | File | Purpose |
 |------|---------|
-| `scripts/zero_shot_baseline.py` | 20 rolling windows, IC/RankIC/dir accuracy/RMSE/MAE |
-| `scripts/finetuned_eval.py` | Same metrics for finetuned checkpoints, `--compare` flag |
-| `scripts/eval_ensemble.py` | 50+ windows, bootstrap 95% CIs, tests ZS/FT_v1/FT_v2/ensemble_eq/ensemble_full |
+| `src/backtest/strategy_api.py` | Contracts: ForecastBundle, RegimeLabel, AssetDecision, TradeIntent, Strategy, Sizer |
+| `src/backtest/strategies.py` | DirectionalMomentum / DirectionalMomentumATR / RegimeGatedTrend / MeanReversion |
+| `src/backtest/sizing.py` | InverseWidthRiskParity, EqualWeight (VolTarget/Kelly: todo in v2) |
+| `src/backtest/portfolio_engine.py` | Pluggable joint multi-asset walk-forward engine (CPU, off cache) |
+| `src/backtest/grid.py` | Shared rebalance grid + context location (cache & engine must agree) |
+| `src/backtest/costs.py` | Cost models incl. CRYPTO_COSTS / COMMODITY_COSTS |
+| `src/backtest/metrics.py` | Sharpe, drawdown, Calmar, deflated Sharpe |
+| `src/model/forecast_cache.py` | Build (GPU) / load (CPU) per-(asset,rebalance) forecast cache |
+| `src/model/build.py` | build_market_ensemble — single source of truth for ensemble composition |
+| `src/model/batched_inference.py` | Batched MC paths (fixes Kronos's path-averaging) |
+| `src/model/ensemble.py` | EnsemblePredictor (predict_with_quantiles) |
+| `src/regime/indicators.py` | hurst, adx, atr, realized_vol, vol_percentile (reusable for vol sizing) |
+| `src/regime/classifier.py` | Hurst+ADX composite (empirically net-negative as a gate) |
+| `src/risk/cqr.py` | CQR calibration (works as designed) |
+| `scripts/backtest_portfolio.py` | CPU strategy A/B driver (--strategy/--sizer/--tag) |
+| `scripts/build_forecast_cache.py` + `slurm/build_forecast_cache.sh` | One-time GPU cache build |
+| `scripts/forecast_skill.py` | IC / hit / confidence-stratification / cross-sectional rank IC |
+| `scripts/horizon_skill.py` + slurm wrappers | IC + hit at every horizon step |
+| `scripts/vol_skill.py` | Vol-forecast IC vs naive persistence baseline |
+| `scripts/test_strategy_equivalence.py` | Regression proof: refactor == original engine |
+| `docs/STRATEGY_DESIGN.md` | Signed-off pluggable-architecture design doc |
 
-### Core Source
-
-| File | Purpose |
-|------|---------|
-| `src/model/loader.py` | Load zero-shot or finetuned models. Maps market→exp_name (btc→cifr-btc) |
-| `src/model/ensemble.py` | `EnsemblePredictor` — weighted average, Monte Carlo paths, quantile bands |
-| `src/model/predictor.py` | KronosPredictor wrapper |
-| `src/model/sampler.py` | Multi-path Monte Carlo sampling |
-| `src/risk/cqr.py` | Conformalized Quantile Regression |
-| `src/risk/quantile.py` | Empirical quantile extraction |
-| `src/risk/position_sizer.py` | Adaptive position sizing |
-| `src/backtest/engine.py` | Walk-forward backtest runner |
-| `src/backtest/costs.py` | Transaction cost models |
-| `src/backtest/metrics.py` | Sharpe, drawdown, Calmar, etc. |
-| `src/strategy/llm_generator.py` | LLM strategy code generation |
-| `src/strategy/executor.py` | Strategy execution engine |
-| `src/strategy/context_builder.py` | Build context packs for LLM |
-
-### Data
-
+### Key results on HPC (`results/`)
 | Path | Contents |
 |------|----------|
-| `data/processed/btc/` | ~97k 15m candles, split into tokenizer_train.csv, validation.csv, test.csv |
-| `data/processed/eur/` | ~23k 1h candles, same splits |
-| `data/processed/xau/` | ~9.5k 4h candles, same splits |
+| `results/cqr/cqr_calibrations.json` | 21 assets, 90%→91-92.5% coverage |
+| `results/forecasts/{crypto,commodity}_forecasts.csv` | The forecast cache (2516 + 384 rows) |
+| `results/backtest/portfolio_backtest_*.json` | baseline / rgt_strict / rgt_relaxed / meanrev / atr_10 / atr_15 / atr_20 |
 
----
-
-## What's Next (In Order)
-
-1. ✅ **Fetch multi-asset data** — 15 crypto (Binance) + 7 commodity (TwelveData/yfinance) done
-2. ✅ **Create BTC v2 config + train** — seed=137, val_loss=2.6672, complete
-3. 🔄 **CQR calibration** — Job 510442 (June 8) **TIMED OUT** at 12h with empty `{}` (crypto leg too heavy + results only written at end). Script now saves per-asset incrementally and resumes. **Run order**: `sbatch slurm/cqr_calibrate_commodity.sh` (fast), then `sbatch slurm/cqr_calibrate_crypto.sh` (resubmit to resume if it hits 12h). Accumulates in `results/cqr/cqr_calibrations.json`.
-4. ✅ **Multi-asset walk-forward backtest** — `scripts/backtest_portfolio.py` + `src/backtest/portfolio_engine.py` + `src/model/build.py`. Ran June 9 (job 511139). **Results below.**
-5. ⏳ **Regime detection + strategy redesign** — HIGHEST IMPACT. Backtest proved the current single directional strategy only works in trends. See "Strategy Roadmap" below.
-6. ⏳ **LLM strategy layer** — Generate and evaluate strategy code
-7. ⏳ **Final test set evaluation** — Touched exactly ONCE
-
----
-
-## Backtest Results (June 9, 2026 — job 511139)
-
-90-day walk-forward (2026-03 → 2026-06), $100k split 50/50, long & short, CQR-gated, batched MC paths. **Ran clean, full coverage, MATIC correctly excluded (data ends 2024).**
-
-| Market | Return | Sharpe | Calmar | Max DD | Win% | PF | Trades |
-|--------|--------|--------|--------|--------|------|----|--------|
-| Crypto (15m) | **−23.4%** | **−3.28** | −2.46 | −26.9% | 46.6% | 0.81 | 2358 |
-| Commodity (4h) | **+16.0%** | **+4.36** | 16.5 | −5.0% | 51.7% | 1.52 | 331 |
-| **Combined** | **−5.1%** | **−1.20** | −1.50 | −12.6% | 47.3% | 0.91 | 2689 |
-
-**Verdict:** Crypto is a decisive loser (double-negative: <50% win rate AND avg loss > avg win; likely tripped the 25% DD halt). Commodity looks excellent **but is unverified** — almost certainly trend-regime luck (energy trended hard: Crude +$2.5k, Brent +$3.1k) on a single window + small sample; Sharpe 4.36 is not believable as a sustained number. Same engine + same CQR on both markets → the asymmetry is **regime/market-structure driven, not a code bug**.
-
-### Strategy we ran (the ONLY one so far)
-Single **probabilistic-directional** strategy: ensemble of 30 Kronos MC paths → majority vote = direction + confidence; gate at conf ≥ 0.55 (too weak, ~16/30); SL/TP = CQR-widened q05/q95 band; inverse-interval-width risk parity (10% cap); intrabar SL/TP else timeout. Always-in when confident, symmetric long/short, single horizon.
-
----
-
-## VERDICT (June 9-10 2026): no directional alpha — pivot to volatility
-
-Comprehensive skill testing (forecast_skill.py, horizon_skill.py) is conclusive:
-the Kronos OHLCV ensemble has **NO statistically significant price-direction
-alpha** on either market, time-series OR cross-sectional, at any horizon:
-- Crypto directional hit 50.8% (NS); IC ~0 across all 48 horizons; **cross-
-  sectional rank IC mean +0.019, t-stat +0.76 (NOT significant)**.
-- Commodity directional 50.3%; cross-sectional t-stat −0.01; +14% backtest = beta.
-- Confidence measure degenerate (82% pinned >0.80, that bucket = coinflip).
-
-This is a real, rigorous negative result. STOP iterating directional strategies.
-
-**PIVOT: predict volatility, not direction.** Vol clusters and is forecastable
-(the robust stylized fact). The cache already holds a vol forecast — the quantile
-spread (q95-q05) — that we only ever (mis)used as a stop level.
-`scripts/vol_skill.py` tests whether predicted spread rank-correlates with
-realised vol, vs a naive context-vol persistence baseline. CPU off the cache.
-- If pred_width IC >> baseline and significant → real skill at RISK forecasting →
-  build vol-targeting / risk overlay / vol products around it.
-- If it only matches naive persistence → model adds nothing; reconsider inputs
-  (funding/order-flow/cross-asset) or treat the whole thing as a documented
-  negative result + reusable infra (cache, pluggable engine, diagnostics, CQR).
-
-## FORECAST SKILL DIAGNOSTIC (June 9 2026) — pivotal finding
-
-Decoupled the forecaster from the strategy (`scripts/forecast_skill.py`, CPU off
-cache). **At the tested horizons the Kronos ensemble has NO statistically
-significant directional edge:**
-- Crypto (n=2516): hit 50.8% (SE ~1.0% → 0.8σ, noise); pooled IC +0.004 (noise
-  floor ~0.020). Mean signed edge NEGATIVE (−0.019%) pre-cost.
-- Commodity (n=384): hit 50.3%; pooled IC −0.022 (noise floor ~0.051).
-- **Confidence is degenerate**: 82% of crypto forecasts pin at >0.80 confidence,
-  and that bucket hits 50.7% (coinflip). MC-path agreement carries no info.
-- **Commodity +14% backtest was BETA, not alpha**: hit 50.3% (coinflip) but mean
-  signed edge +0.14% → money came from big asymmetric moves in a trending energy
-  quarter, NOT from forecasting skill. Will not survive a flat/reversing window.
-
-**ATR sweep corroborated** (atr_10: RR 1.0, win 48.9% = sub-coinflip): no exit
-scheme rescues a coinflip signal. directional_atr crypto −26%, commodity fell
-+14%→−5% (tight stops cut trend winners).
-
-**Untested decisive variable = HORIZON.** All skill numbers are the 48-bar
-(crypto) / 6-bar (commodity) ENDPOINT. Skill usually lives at SHORT horizons and
-decays. `scripts/horizon_skill.py` (GPU, slurm/horizon_skill.sh) measures IC +
-hit at every step h=1..pred_len. **This decides the project**: if short-horizon
-IC >~0.03 and rising toward h=1 → pivot to short-horizon trading (rebuild cache
-with small pred_len). If flat ~0 at every horizon → model has no extractable
-directional edge on this data; reconsider approach (features, different signal,
-or accept it doesn't work).
-
-## Strategy A/B Sweep #1 (June 9 2026, off forecast cache)
-
-Refactor verified faithful: baseline reproduced crypto −23.7% / commodity +14.1%.
-Then swept 4 strategies CPU-only off `results/forecasts/` (instant, no GPU):
-
-| Strategy | Crypto | Commodity | Crypto exit mix (tp/sl/timeout) |
-|----------|--------|-----------|---------------------------------|
-| directional (baseline) | −23.7% | **+14.1%** | 0 / 31 / 2341 |
-| regime_gated_trend strict | −2.1% (36 tr) | **0 trades** | 0 / 0 / 36 |
-| regime_gated_trend relaxed | −5.8% (108 tr) | **0 trades** | 0 / 0 / 108 |
-| mean_reversion (ATR exits) | −6.2% | +1.8% (Sh 1.20) | **106 / 195 / 25** |
-
-**Two hard findings:**
-1. **CQR band is INERT as SL/TP** — 0 take-profits in 2372 crypto trades; every
-   trade rides 12h to timeout. The band is calibrated for distributional
-   coverage, far too wide to trigger intrabar. Directional = pure horizon bet.
-2. **Hurst+ADX regime gating is a NET NEGATIVE** — it makes 0 commodity trades
-   (kills the only profitable book) because Hurst never labels trending energy
-   as "trend." The signed-off composite is empirically wrong for these markets.
-   ADX-only or vol-only gating may still be worth a look; Hurst is the problem.
-3. **ATR exits WORK** — mean_reversion's ATR stops produced real tp/sl fills
-   (106/195/25). Direction was wrong for crypto, but exits fired. → Phase C.
-
-**Next experiment (Phase C, building):** `directional_atr` = winning direction
-(momentum) + working exits (ATR TP/SL, RR 1.5) — the untested winning-direction
-+ working-exits cell. Knobs: `--stop-atr-mult`, `--tp-atr-mult`.
-
-## Strategy Roadmap (research-driven, June 9 2026)
-
-Backtest + literature (López de Prado, regime-filter and vol-targeting research) point to four high-leverage changes. **Build as a pluggable strategy interface so we can backtest many and compare — don't hardcode one.**
-
-1. **Regime filter (biggest lever).** Trend systems fail in ranges; MR fails in trends — exactly our crypto-vs-commodity split. Add Hurst exponent / ADX / realized-vol classifier per asset per rebalance. Only allow directional/momentum trades in trending regimes; switch to mean-reversion (or stand aside) in chop. This alone likely fixes crypto's bleed.
-2. **Meta-labeling (López de Prado).** Keep Kronos as the *primary* (direction) model; train a secondary binary classifier (RF/GBM on vol, momentum, autocorr, RSI, spread, confidence) that decides **trade vs skip**. Documented lift: precision/accuracy up, false positives down — directly targets our 46.6% crypto win rate. Replaces the naive 0.55 confidence gate.
-3. **Volatility-targeted stops & sizing.** Replace static CQR-band SL/TP with **ATR-based stops (1.5–2× ATR)** — research shows ~35% fewer premature stop-outs vs flat rules. Size to a **volatility target** (and/or fractional/half-Kelly using the model's own win-rate & payoff estimate), not just inverse interval width. "Vol is more predictable than direction" — lean on it.
-4. **Strategy library to A/B test.** Candidates to implement behind one interface and run through `portfolio_engine`: (a) directional-momentum [current], (b) mean-reversion on the CQR band (fade q05/q95 touches), (c) breakout/trend-following gated by regime, (d) market-neutral long-top / short-bottom cross-sectional rank by expected return, (e) meta-labeled version of each. Compare on Sharpe, deflated-Sharpe, trade count, exit mix.
-
-**Caveats to enforce next:** multi-window walk-forward (not one 90-day window), deflated Sharpe / multiple-testing haircut, and a flat/non-trending validation window to test the commodity regime-luck hypothesis before trusting +16%.
-
----
-
-## Research Findings (Quant Firm Research, June 6 2026)
-
-### Key Takeaways
-
-1. **No public profitable Kronos trading results** — paper acknowledges backtesting is "simplified example, not production-ready"
-2. **Top firms (RenTech, Two Sigma, Citadel)** use ensemble of weak uncorrelated signals, not single strong models
-3. **Renaissance Medallion** ~35% annualized after fees — uses ensemble methods, alternative data, regime detection
-4. **What kills ML trading**: overfitting, ignoring regime changes, not accounting for execution costs
-5. **Realistic targets**: Sharpe 1.0-1.5 excellent, 2.0+ exceptional for retail quant
-
-### Actionable Recommendations Applied
-
-- Ensemble architecture (ZS + multi-seed FT) ✅
-- Anti-overfitting for XAU (v2 config) ✅ 
-- CQR for uncertainty quantification (code exists, needs calibration) ⏳
-- Regime detection (not yet implemented) ❌
-- Walk-forward backtest with costs (code exists, needs running) ⏳
+### v1 legacy (kept, not in active use)
+Finetune configs (`finetune/config_*.yaml`), finetune SLURM scripts, eval scripts (`zero_shot_baseline.py`, `finetuned_eval.py`, `eval_ensemble.py`), CQR calibration scripts, single-asset engine (`src/backtest/engine.py`), orchestrator (`src/portfolio/orchestrator.py`), LLM strategy layer v1 (`src/strategy/` — llm_generator/executor/context_builder + single-asset strategies), data fetchers (`scripts/fetch_universe.py`, `fetch_commodities_yf.py` — patterns to reuse for fetch_derivs.py).
 
 ---
 
@@ -344,39 +184,20 @@ Backtest + literature (López de Prado, regime-filter and vol-targeting research
 
 | Problem | Cause | Fix |
 |---------|-------|-----|
-| `FileNotFoundError` on data | Relative paths resolve wrong from `Kronos/finetune_csv/` | Use absolute paths in YAML: `/home/s3702111/cifr-quant/data/processed/...` |
-| HuggingFace 401 | Wrong repo name or no auth | Repo is `NeoQuasar/Kronos-base` (not Tsinghua-AIR). Use `hf auth login` with read token |
-| HuggingFace httpx closed | Compute nodes can't reach internet | Cache on head node with `snapshot_download()`, use `HF_HUB_OFFLINE=1` |
-| Checkpoints not found | Training saves to `Kronos/checkpoints/`, loader looks in `checkpoints/` | Symlink: `ln -s Kronos/checkpoints checkpoints` |
-| Conda activation fails | Direct path doesn't exist | Use: `source $(conda info --base)/etc/profile.d/conda.sh && conda activate trade` |
-| XAU overfitting | 50 tokenizer + 20 predictor epochs on 9.5k candles | v2: 15+5 epochs, lower LR, higher weight decay |
-| BTC killed at time limit | 8h too short for predictor training | Updated to 20h, `skip_existing: true` skips completed tokenizer |
-| CQR job TIMEOUT, empty `{}` results (job 510442) | Crypto leg ~40h (15 assets × ~179 windows × ~48 MC calls × 48 steps) >> 12h wall, and results were only written at the very end so timeout lost everything. tee log also never appeared (`slurm/logs/` didn't exist) | `calibrate_cqr_multi.py` now saves per-asset incrementally + resumes (skips assets already in JSON; `--force` to redo). Split into `slurm/cqr_calibrate_commodity.sh` (cheap) + `slurm/cqr_calibrate_crypto.sh` (n_paths 30, `--step-size 96`, resubmit to resume). All SLURM scripts `mkdir -p logs` before tee |
-| SLURM logs not visible | Compute nodes have delayed NFS sync | Logs appear only AFTER job completes. Use `tee` inside script for real-time, or `sacct -j JOBID` to check status |
-| CQR tqdm error | Old tqdm version on HPC | Don't use `miniinterval` kwarg in tqdm constructor |
-| TwelveData commodity failures | Free tier only supports XAU/USD | Use `scripts/fetch_commodities_yf.py` for other commodities via yfinance futures |
-| Git merge conflicts on HPC | Local edits on HPC diverge from Mac | `git stash && git pull --rebase && git stash pop`, or `git checkout --theirs <file>` |
-
----
-
-## Development Environment
-
-### Primary: HP Laptop (as of June 8, 2026)
-
-- Clone: `git clone https://github.com/ImSounic/cifr-quant.git`
-- Python env: `conda create -n trade python=3.11 && conda activate trade`
-- Install: `pip install torch transformers pandas numpy ccxt yfinance twelvedata tqdm scipy`
-- Kronos submodule: `cd Kronos && pip install -e .` (or ensure Kronos/ is on PYTHONPATH)
-- HuggingFace: `pip install huggingface_hub && huggingface-cli login` (read token)
-- Data: `data/` is gitignored. Re-fetch with `python scripts/fetch_universe.py --market crypto --tiers 1 2`
-- Checkpoints: `checkpoints/` is gitignored. For inference, download from HPC: `scp -r s3702111@hpc-head1.ewi.utwente.nl:~/cifr-quant/Kronos/checkpoints ./checkpoints/`
-- SSH to HPC: `ssh s3702111@hpc-head1.ewi.utwente.nl`
-
-### Training: UTwente HPC (SLURM)
-
-- All finetuning and GPU-heavy eval runs on HPC
-- Checkpoints live at `~/cifr-quant/Kronos/checkpoints/` on HPC, symlinked to `~/cifr-quant/checkpoints/`
-- Use L40S (Lovelace) GPUs: `--gres=gpu:lovelace:1`
+| `FileNotFoundError` on data | Relative paths resolve wrong from `Kronos/finetune_csv/` | Absolute paths in YAML |
+| HuggingFace 401 | Wrong repo name | `NeoQuasar/Kronos-base`; `hf auth login` with read token |
+| HuggingFace httpx closed | Compute nodes offline | Cache on head node, `HF_HUB_OFFLINE=1` |
+| Checkpoints not found | Saves to `Kronos/checkpoints/`, loader expects `checkpoints/` | `ln -s Kronos/checkpoints checkpoints` |
+| Conda activation fails | Direct path doesn't exist | `source $(conda info --base)/etc/profile.d/conda.sh && conda activate trade` |
+| SLURM job stuck PD for days | Oversized request (128G/32CPU) blocks backfill | Right-size to 32G/8CPU |
+| Long job times out, loses results | Results written only at end | Save incrementally per asset + resume (see calibrate_cqr_multi.py) |
+| SLURM logs invisible mid-run | NFS sync delay | `tee` inside script + `mkdir -p slurm/logs` first |
+| Kronos paths averaged | `predict(sample_count=N)` averages N paths | Use `src/model/batched_inference.predict_paths` |
+| Login-node python = CPU | No GPU on hpc-head | GPU work goes through sbatch, always |
+| Small-n IC looks amazing | e.g. n=24 commodity h=1 IC +0.29 → +0.05 at n=384 | Never read an IC without n and a t-stat |
+| Single-window Sharpe 4+ | Regime beta masquerading as alpha | Decouple signal from strategy; hit-rate + signed-edge separates skill from drift |
+| TwelveData free tier | Only XAU/USD works | yfinance futures for other commodities |
+| Git push rejected on laptop | HPC/remote ahead | `git pull --rebase` then push |
 
 ---
 
