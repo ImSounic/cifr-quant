@@ -171,7 +171,15 @@ Finetuned checkpoints (BTC v1/v2, XAU v1/v2); batched MC path generation (`src/m
 2. ⏳ **OI/squeeze diagnostic** (~end June, when OI history is thick enough). *Why next*: data already accumulating, structurally different from carry (positioning vs flows) → a candidate second brick.
 3. ⏳ **Phase 2D — portfolio layer** once ≥2 bricks: combine validated strategies with **vol-targeted sizing** (vol persistence IC 0.61 is free and proven — it's the risk layer, not the alpha). *Why*: fixes carry's −30% maxDD properly, and uncorrelated bricks raise portfolio Sharpe more than any single-strategy tuning could.
 4. ⏳ **Phase 3 — LLM as a data source**: news/events/sentiment → numerical features → the same gauntlet. *Why upstream not downstream*: lesson #2 of the post-mortem; text is the one input where LLMs extract information nothing else can.
-5. ⏳ **Phase 4.5 — venue decision** (OKX vs Hyperliquid) at graduation, on the evidence the demo lab is collecting now.
+5. ✅/⏳ **Phase 4.5 — venue decided (OKX)**; remaining pre-live items:
+   - **Infrastructure migration**: the live stack needs UPTIME, not compute — the
+     HPC head node serves as a free always-on server today, but the account is
+     tied to Raj's studies and a live firm shouldn't run on university infra.
+     Before real capital: move the cron stack to a small owned VPS (~€5/mo,
+     one afternoon — everything is already cron + git).
+   - **Backups**: the accumulating OKX/HL funding archives + paper-trading track
+     record live ONLY on the HPC (gitignored). Weekly rsync to the laptop
+     (`results/paper/`, `data/raw/derivs_okx/`) until the VPS exists.
 6. ⏳ **Phase 5 — platform** in thin slices as pain appears (alerting ✅ done; dashboard at graduation; research console + automated trial ledger when signal #2 enters; execution console + kill switch only when real capital). *Why thin slices*: building a pretty platform around one Sharpe-0.5 book is the classic small-fund failure mode.
 
 ### Closed items (and why)
