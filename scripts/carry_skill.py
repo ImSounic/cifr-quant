@@ -181,6 +181,32 @@ def main():
         print(f"    {h}: mean XS IC={np.nanmean(ics):+.4f}  t={t:+.2f}  periods={n}  "
               f"IC<0 in {np.mean(np.asarray(ics) < 0):.0%}", flush=True)
 
+    # ---------- 2b. Stability by calendar year (the multi-window rule) ----------
+    print("\n  XS IC stability by year (a real edge shows up in EVERY regime):", flush=True)
+    merged["year"] = merged["timestamp"].dt.year
+    for year, ydf in merged.groupby("year"):
+        line = f"    {year}:"
+        for h, n_ev in HORIZONS.items():
+            ics = []
+            for i, (ts, g) in enumerate(ydf.groupby("timestamp")):
+                if i % n_ev:
+                    continue
+                if len(g) >= 5:
+                    ic = _spearman(g["funding"], g[f"ret_{h}"])
+                    if np.isfinite(ic):
+                        ics.append(ic)
+            if len(ics) >= 20:
+                t, n = _tstat(np.asarray(ics))
+                line += f"  {h}: IC={np.nanmean(ics):+.3f} t={t:+.2f} (n={n})"
+        print(line, flush=True)
+
+    # Harvest stability by year (mean funding per asset-event, annualized)
+    print("\n  Harvest stability by year (universe mean ann. funding yield):", flush=True)
+    for year, ydf in merged.groupby("year"):
+        ann = ydf["funding"].mean() * 3 * 365
+        pos = (ydf["funding"] > 0).mean()
+        print(f"    {year}: mean ann. yield={ann:+.2%}  %pos events={pos:.0%}", flush=True)
+
     # ---------- 3. Harvest economics ----------
     print("\n  Funding HARVEST (short perp / long spot collects positive funding):",
           flush=True)
