@@ -141,10 +141,30 @@ Finetune Kronos (foundation model for candlesticks) per market → ensemble MC-p
    simulates fills at mark±3bp, persists `results/paper/carry_state.json` +
    `carry_history.csv`. Measures signal-live consistency vs backtest. Frozen params
    in the script header — ANY change = new strategy, must re-earn the gate.
-   v2 (later): Binance testnet limit orders to price maker fill risk.
+   v2 fill-risk measurement (June 10): Binance testnet is DOWN for revamp and
+   Binance demo is unreachable from NL (**Binance withdrew from the Netherlands
+   in 2023 — geo-blocked**). Pivot: (a) synthetic maker-fill measurement built
+   INTO the shadow trader — records bid/ask at decision time, next cycle checks
+   whether price traded STRICTLY through the level over the 8h window = LOWER
+   BOUND on maker fill rate (`synth_orders`/`synth_filled` columns; measurement
+   only, frozen economics untouched). `scripts/testnet_trade_carry.py` exists
+   (points at demo-fapi.binance.com) but is unusable from NL; adapt to OKX demo
+   (MiCA-licensed, legal in NL, ccxt-supported) if account-based simulation is
+   needed. **STRATEGIC: the live venue cannot be Binance from NL.** Candidates:
+   OKX (CEX, MiCA) or Hyperliquid (permissionless DEX perps, carry-friendly).
+   Venue selection = Phase 4.5 decision; note venue funding rates ≠ Binance
+   funding rates — re-validate carry on the chosen venue's own funding data
+   before going live there.
 4. ⏳ **Phase 2D — Portfolio the survivors**: validated signals → pluggable engine (`--strategy` plug-ins) with **vol-targeted sizing** (vol persistence IC 0.61 is free and proven — it's the risk layer, not the alpha).
 5. ⏳ **Phase 3 — LLM as data source** (the v1 vision, pointed the right way): text→features (news/sentiment/events) → same IC diagnostics. NOT a strategy picker.
 6. ⏳ **Phase 4 — Paper trading loop** (Binance testnet) — makes it a firm, generates execution data.
+7. ⏳ **Phase 5 — Proprietary platform** (build thin slices as pain appears, NOT a big-bang UI):
+   (a) ops/alerting FIRST — cron heartbeat + tripwire alerts (Telegram/email); a silent
+   cron death would quietly kill the 30-day shadow run; (b) monitoring dashboard (shadow
+   equity vs backtest band, book, funding vs expected) around testnet graduation;
+   (c) research console + AUTOMATED TRIAL LEDGER (every diagnostic/backtest config +
+   t-stat logged to a registry — makes deflated-Sharpe corrections automatic) when
+   signal #2 enters; (d) execution console + kill switch only when real capital.
 
 **Methodology rules (non-negotiable, learned the hard way):**
 - A signal must pass IC/t-stat diagnostics (|t|>2) BEFORE any backtest is run on it.

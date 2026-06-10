@@ -18,10 +18,16 @@ Each 8h cycle:
      cycle retry (that friction is exactly the fill risk we're measuring).
   5. Append to results/paper/testnet_history.csv.
 
-Setup (one time):
-  1. Register at https://testnet.binancefuture.com (free, fake USDT balance).
-  2. Generate an API key/secret on its dashboard.
-  3. Add to the cron line as env vars (testnet keys control no real money).
+Setup (one time) — NOTE June 2026: the old testnet.binancefuture.com portal is
+DOWN for Binance's revamp; the replacement is Binance DEMO TRADING:
+  1. Log into (or create) a regular Binance account — no KYC needed for demo.
+  2. Open https://demo.binance.com/futures -> [Start Demo Trading]
+     (also reachable via More -> Demo Trading on the main site/app).
+  3. Inside the DEMO environment, open API Management and create an API
+     key/secret (demo keys, fake balance, control no real money).
+  4. Add them to the cron line as env vars. The script targets the demo API
+     base (demo-fapi.binance.com) automatically; set BINANCE_USE_OLD_TESTNET=1
+     to fall back to the legacy testnet endpoints if you have old keys.
 
 Cron (10 min after each funding event, after the shadow trader's slot;
 head node is CEST = UTC+2):
@@ -53,6 +59,16 @@ MIN_DELTA_USD = 50.0      # ignore dust rebalances
 LEVERAGE = 2              # margin headroom for the short leg; gross stays 1.0
 
 
+def _to_demo_urls(node):
+    """Rewrite ccxt's sandbox URLs (legacy testnet.binancefuture.com) to the
+    new Binance Demo Trading API base (demo-fapi.binance.com)."""
+    if isinstance(node, dict):
+        return {k: _to_demo_urls(v) for k, v in node.items()}
+    if isinstance(node, str):
+        return node.replace("testnet.binancefuture.com", "demo-fapi.binance.com")
+    return node
+
+
 def get_exchange():
     key = os.environ.get("BINANCE_TESTNET_KEY", "").strip()
     sec = os.environ.get("BINANCE_TESTNET_SECRET", "").strip()
@@ -61,6 +77,8 @@ def get_exchange():
         sys.exit(1)
     ex = ccxt.binanceusdm({"apiKey": key, "secret": sec, "enableRateLimit": True})
     ex.set_sandbox_mode(True)
+    if os.environ.get("BINANCE_USE_OLD_TESTNET", "") != "1":
+        ex.urls = _to_demo_urls(ex.urls)
     ex.load_markets()
     return ex
 

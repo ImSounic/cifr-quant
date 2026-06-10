@@ -73,12 +73,42 @@ def fetch_live(symbols):
             ticker = ex.fetch_ticker(m)
             mark = float(ticker["last"])
             rows[sym] = {"signal": float(pd.Series(rates[-SMOOTH:]).mean()),
-                         "last_rate": rates[-1], "mark": mark}
+                         "last_rate": rates[-1], "mark": mark,
+                         "bid": float(ticker.get("bid") or mark),
+                         "ask": float(ticker.get("ask") or mark)}
             latest_event = max(latest_event, ev_ts) if latest_event else ev_ts
             time.sleep(ex.rateLimit / 1000)
         except Exception as e:
             print(f"  skip {sym}: {e}", flush=True)
     return rows, latest_event
+
+
+def adjudicate_fills(pending, since_iso):
+    """Synthetic maker-fill measurement (measurement ONLY — book economics are
+    untouched). A passive order recorded last cycle counts as filled iff price
+    traded STRICTLY through its level during the window since then (buy at bid:
+    some 15m low < bid; sell at ask: some 15m high > ask). Strictness ignores
+    queue position -> this is a LOWER bound on the true maker fill rate."""
+    if not pending:
+        return 0, 0
+    ex = ccxt.binanceusdm({"enableRateLimit": True})
+    since_ms = int(pd.Timestamp(since_iso).timestamp() * 1000)
+    filled = 0
+    for o in pending:
+        try:
+            candles = ex.fetch_ohlcv(o["symbol"], "15m", since=since_ms, limit=40)
+            if not candles:
+                continue
+            lows = [c[3] for c in candles]
+            highs = [c[2] for c in candles]
+            if o["side"] == "buy" and min(lows) < o["price"]:
+                filled += 1
+            elif o["side"] == "sell" and max(highs) > o["price"]:
+                filled += 1
+            time.sleep(ex.rateLimit / 1000)
+        except Exception as e:
+            print(f"  fill-check {o['symbol']}: {e}", flush=True)
+    return filled, len(pending)
 
 
 def target_book(rows, prev_w):
@@ -138,6 +168,12 @@ def main():
     prev_w = {k: float(v) for k, v in state["positions"].items()}
     prev_marks = {k: float(v) for k, v in state["marks"].items()}
 
+    # 0. Synthetic fill adjudication for the trades implied LAST cycle
+    #    (measurement only; the book's economics below are unchanged).
+    synth_filled, synth_total = adjudicate_fills(
+        state.get("pending_fills", []), state["last_event"]) \
+        if state.get("last_event") else (0, 0)
+
     # 1. Mark the held book: price PnL since last marks + REAL funding accrual.
     price_pnl = 0.0
     for a, w in prev_w.items():
@@ -157,11 +193,22 @@ def main():
     state["positions"] = new_w
     state["marks"] = {a: rows[a]["mark"] for a in rows}
 
+    # Record this cycle's implied passive orders for next cycle's fill check.
+    pending = []
+    for a in set(list(new_w.keys()) + list(prev_w.keys())):
+        dw = new_w.get(a, 0.0) - prev_w.get(a, 0.0)
+        if abs(dw) > 1e-6 and a in rows:
+            side = "buy" if dw > 0 else "sell"
+            pending.append({"symbol": f"{a}:USDT", "side": side,
+                            "price": rows[a]["bid" if side == "buy" else "ask"]})
+    state["pending_fills"] = pending
+
     STATE_PATH.write_text(json.dumps(state, indent=2))
 
     row = {"run_at": now, "event": event_iso, "n_assets": len(rows),
            "price_pnl": price_pnl, "funding_pnl": fund_pnl, "cost": cost,
            "net": net, "equity": state["equity"], "turnover": turnover,
+           "synth_orders": synth_total, "synth_filled": synth_filled,
            "longs": "|".join(a for a, w in new_w.items() if w > 0),
            "shorts": "|".join(a for a, w in new_w.items() if w < 0)}
     hdr = not HIST_PATH.exists()
