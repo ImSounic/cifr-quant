@@ -188,6 +188,38 @@ Finetuned checkpoints (BTC v1/v2, XAU v1/v2); batched MC path generation (`src/m
 
 **Why simple statistics and no ML here**: the carry relationship is nearly linear — a rolling average and a sort capture it fully; a neural net would add overfitting risk and remove interpretability. **Complexity must be earned**: ML returns when there are several validated signals to *combine* (a genuine ML problem); LLMs return when we want features from *text* (a genuinely-LLM problem).
 
+**✅ TERM-STRUCTURE CARRY (July 18) — GATE PASSED (the project's second-ever pass)**
+— the declared next commodity candidate, built and tested in one session.
+*In plain terms*: when a commodity's near future trades ABOVE the next one
+(backwardation), buyers are paying a premium for near delivery — being long
+collects that premium; in contango you get paid to be short. The payer is the
+hedger buying price insurance — an identifiable, willing counterparty (same
+persistence logic as funding carry, different asset class → decorrelated).
+- **Data**: EIA daily contract-1..4 settlements, 6 energy assets, 1985–Apr 2024
+  (EIA discontinued the series then — free 40-year validation panel).
+  yfinance CANNOT provide history (probed: expired contracts 404) but DOES serve
+  today's active curve → daily snapshot accumulator added for the live series
+  (same accumulate-it-ourselves pattern as OKX funding).
+- **Declared construction (4 cells, counted)**: sign(5d-smoothed c1/c2 slope),
+  TS + XS, 5bd + 21bd horizons, non-overlapping samples.
+- **Result**: TS-5bd **t=+3.35** (survives ×4 Bonferroni), ~+14.9%/yr gross,
+  **12/13 positive 3-year buckets** (1985–2024; only 1997-99 at −1.5%),
+  recent decade +11.3%/yr, per-asset: WTI t=+3.35, NG t=+2.36, HO t=+2.02
+  (5/6 assets positive; RBOB −0.35 the one soft spot). Lag-robustness: t stable
+  ~3.2–3.4 at signal lags 0/1/2/5d → no look-ahead. Roll-splice repair via
+  joint column-shift detection (~13 rolls/yr detected ≈ monthly, sane).
+  XS cells dead (t≈0) — within one correlated sector, cross-sectional adds
+  nothing; the tradeable construction is TIME-SERIES.
+- **Honest caveats**: gross of costs (futures costs are small and turnover is
+  low — sign flips are rare — but the EARNED backtest must prove it);
+  out-of-sample gap Apr 2024→now (snapshot cron closes it going forward);
+  energy-only (the literature's stronger multi-sector XS version is data-gated
+  on paid curves); small-account tradability needs micro contracts (MCL/MNG)
+  and a real futures broker — a Phase-4 question, not a diagnostic one.
+- **Next per constitution**: cost-honest backtest of the frozen construction;
+  then the portfolio conversation (funding carry + TS carry = 2 bricks →
+  Phase 2D vol-targeted combination becomes buildable).
+
 **❌ COT positioning (June 10)** — commodities' cheap candidate, killed on 40 years
 of data: spec-crowding percentile mean IC ≈ 0, sign coinflip across 6 commodities,
 the one tempting cell (4w XS t=−2.30) fails multiplicity AND its construction-
