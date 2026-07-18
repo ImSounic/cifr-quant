@@ -140,7 +140,14 @@ def fetch_oi_history(
     accumulates if we run this periodically."""
     ex = _exchange(exchange_id)
     symbol = _perp_symbol(spot_symbol, exchange_id)
-    since = ex.milliseconds() - 30 * 24 * 3600 * 1000  # 30d back (API limit)
+    # Binance serves AT MOST ~30d of OI history and rejects a startTime on the
+    # boundary with -1130 "parameter 'startTime' is invalid" — ask for 29d.
+    since = ex.milliseconds() - 29 * 24 * 3600 * 1000
+    if output_path is not None and output_path.exists():
+        prev = pd.read_csv(output_path)
+        if not prev.empty:
+            last_ms = int(pd.to_datetime(prev["timestamps"]).max().timestamp() * 1000)
+            since = max(since, last_ms + 1)
 
     rows = []
     with tqdm(desc=f"OI {spot_symbol}") as pbar:

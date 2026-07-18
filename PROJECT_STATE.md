@@ -78,8 +78,18 @@ the shadow book, not the OKX book — extension TODO); perp fetcher made increme
 futures mid-window (universe now 13 — handled gracefully, recorded here).
 
 **Graduation decision: PENDING** (options: extend shadow in thin regime while
-hunting brick #2 — OI data is now ripe — vs. graduate to small live capital with
-expectations reset to the regime, ~+4–5%/yr).
+hunting brick #2 vs. graduate to small live capital with expectations reset to
+the regime, ~+4–5%/yr).
+
+**OI accumulation was never actually scheduled (found July 18)**: the plan assumed
+OI history accumulating since June 10, but no cron job fetched Binance OI —
+only the one-off June 10 pull (May 11→Jun 10) existed, and Binance's 30-day
+window means **June 10–18 OI is permanently lost**. Fetcher fixed (-1130 boundary
+bug + incremental) and a daily OI cron added July 18. The July 18 `oi_skill` run
+on the stale 30-day panel is recorded as DATA-GATED, not a kill (n=44/14, best
+cell t=+1.72 — also wrong sign for the squeeze hypothesis). Re-run ~mid-August
+when the panel has ~8 stitched weeks. Until then, the active brick-#2 candidate
+is **commodity term-structure carry** (the declared next, ~1 day of data eng).
 
 ---
 
