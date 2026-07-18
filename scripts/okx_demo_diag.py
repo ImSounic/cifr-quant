@@ -53,12 +53,13 @@ def main():
         print(f"  adjEq   (USD):     {float(acct.get('adjEq') or 0):>12,.0f}", flush=True)
         for d in acct.get("details", []):
             ccy = d.get("ccy")
-            print(f"  [{ccy}] eq={float(d.get('eq') or 0):,.0f}  "
-                  f"availEq={float(d.get('availEq') or 0):,.0f}  "
-                  f"ordFrozen={float(d.get('ordFrozen') or 0):,.0f}  "
-                  f"frozenBal={float(d.get('frozenBal') or 0):,.0f}  "
-                  f"imr={float(d.get('imr') or 0):,.0f}  "
-                  f"mmr={float(d.get('mmr') or 0):,.0f}", flush=True)
+            usd = float(d.get("eqUsd") or 0)
+            print(f"  [{ccy}] eq={float(d.get('eq') or 0):,.4g} {ccy} "
+                  f"(~${usd:,.0f})  "
+                  f"availEq={float(d.get('availEq') or 0):,.4g}  "
+                  f"ordFrozen={float(d.get('ordFrozen') or 0):,.4g}  "
+                  f"imr={float(d.get('imr') or 0):,.4g}  "
+                  f"mmr={float(d.get('mmr') or 0):,.4g}   (native {ccy} units)", flush=True)
     except Exception as e:
         print(f"  (raw balance details unavailable: {e})", flush=True)
 

@@ -35,6 +35,54 @@ CIFR-QUANT is a systematic-trading research project building toward a quant firm
 
 ---
 
+## Day-38 Live Review (July 18, 2026) — findings
+
+**In plain terms**: the 30-day window ran long (reviews were 8 days overdue) but the
+verdict is good where it matters: the strategy is being executed live *exactly* as
+the backtest promised — the market is just paying less rent right now. Separately,
+the OKX practice book turned out to be broken in an instructive way, and two of our
+own monitoring scripts had bugs (all fixed).
+
+**Shadow book (the strategy test): 6/7 checklist PASS.** Coverage 100% (116/116
+cycles), turnover 0.099 vs 0.11 promised, synthetic maker-fill lower bound 100%
+(68/68), OKX real post-only fill rate 96% on $785k placed (0 post-only rejects) —
+**the maker-execution assumption, the strategy's biggest unprovable, is now
+validated with real orders**. Beta to BTC +0.055 (neutral as designed). Equity
+−4.59% is inside the 2σ noise band.
+
+**The one FAIL — funding collection (+0.0043%/event vs the +0.0070% constant,
+z=−12) — attributed via `shadow_vs_backtest.py`**: the frozen backtest run over the
+SAME 38-day window also collects +0.0042%/event; live-vs-backtest funding corr is
+**0.98**, paired-t 0.4. → The implementation is faithful; the shortfall is the 2026
+low-funding REGIME (already noted June 10). Lesson recorded: checklist constants
+for regime-dependent quantities must be window-matched, not unconditional 5-year
+means — `shadow_vs_backtest.py` is now the standing tool for that.
+
+**OKX demo book post-mortem (root cause found July 18)**: the demo account is
+seeded with 1 BTC + 1 ETH + 100 OKB + ~$1.5k USDT (≈$75k total), but in
+single-currency margin mode only USDT counts as margin for USDT-swaps. The
+executor sizes off totalEq (~$75k) → every position wants ~$12.5k → only ATOM ever
+fully filled, consuming nearly all usable margin → 224× error 51008, book frozen
+for weeks as a ~$11.5k naked ATOM long + dust. NOT a strategy failure — an
+execution-lab account-setup failure. The fill-rate measurements remain valid.
+*Fix path*: convert the demo BTC/ETH/OKB to USDT (or enable multi-currency margin),
+flatten the stray book, restart the loop. Zombie-order hypothesis tested and
+rejected (0 open orders, ordFrozen=0; `okx_demo_diag.py` is the tool).
+
+**Ops repairs shipped (July 18, laptop → git → HPC)**: `paper_review.py` and
+`heartbeat_carry.py` fixed for the mixed 11/13-column history CSV (schema grew
+mid-run); heartbeat had also silently VANISHED from the HPC (it was never
+committed — now tracked; watchdog was down the whole window and it only monitors
+the shadow book, not the OKX book — extension TODO); perp fetcher made incremental
+(was skip-if-exists, silently serving June-10 data); MATIC delisted from Binance
+futures mid-window (universe now 13 — handled gracefully, recorded here).
+
+**Graduation decision: PENDING** (options: extend shadow in thin regime while
+hunting brick #2 — OI data is now ripe — vs. graduate to small live capital with
+expectations reset to the regime, ~+4–5%/yr).
+
+---
+
 ## THE LIVE MACHINE (what is running right now, unattended)
 
 | When (CEST) | Job | What it does |
