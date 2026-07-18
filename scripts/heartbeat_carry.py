@@ -74,7 +74,8 @@ def main():
                          f"{HIST_PATH} does not exist — has the paper trader ever run?"))
     else:
         import pandas as pd
-        hist = pd.read_csv(HIST_PATH)
+        from paper_review import load_carry_history
+        hist = load_carry_history(HIST_PATH)
         last_run = pd.Timestamp(hist["run_at"].iloc[-1])
         if last_run.tzinfo is None:
             last_run = last_run.tz_localize("UTC")
