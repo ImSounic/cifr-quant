@@ -142,6 +142,55 @@ def brick2_daily_volweighted():
     return r[r.index >= r.first_valid_index()]
 
 
+def brick3_daily():
+    """Frozen FX-carry brick (G10 top3/bot3 + EM top2/bot2, 50/50 across the
+    live books), marked DAILY: weights set at month-end from the prior-month
+    rate print and held through the month; daily return = spot log-change +
+    carry accrual/252; costs (5bp G10 / 20bp EM per side) on the monthly
+    weight changes. Before 1997 (EM panel starts) the brick is the G10 book
+    alone."""
+    from fx_carry_skill import fred, UNIVERSE as G10U, US_RATE
+    from fx_carry_retest import EM_UNIVERSE
+
+    us_m = fred(US_RATE).resample("ME").last()
+    books = []
+    for universe, min_live, kmax, cost in [(G10U, 6, 3, 0.0005),
+                                           (EM_UNIVERSE, 4, 2, 0.0020)]:
+        spots, carr = {}, {}
+        for ccy, (spot_s, usd_per_ccy, rate_s) in universe.items():
+            try:
+                sp, rt = fred(spot_s), fred(rate_s)
+            except Exception:
+                continue
+            sp = sp if usd_per_ccy else 1.0 / sp
+            spots[ccy] = np.log(sp)
+            carr[ccy] = rt.resample("ME").last() - us_m
+        S = pd.DataFrame(spots).sort_index()
+        Cl = pd.DataFrame(carr).shift(1)              # publication-lag safe
+
+        w_by_month = {}
+        for t in Cl.index:
+            c = Cl.loc[t].dropna()
+            c = c[[a for a in c.index if a in S.columns]]
+            if len(c) < min_live:
+                continue
+            k = kmax if len(c) >= 3 * kmax else 1
+            order = c.sort_values()
+            w = pd.Series(0.0, index=S.columns)
+            w[order.index[-k:]] = 0.5 / k
+            w[order.index[:k]] = -0.5 / k
+            w_by_month[t] = w
+        W = pd.DataFrame(w_by_month).T
+        Wd = W.reindex(S.index, method="ffill").shift(1).fillna(0.0)
+        dS = S.diff()
+        carry_d = Cl.reindex(S.index, method="ffill") / 100 / 252
+        ret = (Wd * (dS + carry_d).fillna(0.0)).sum(axis=1)
+        net = ret - Wd.diff().abs().sum(axis=1) * cost
+        books.append(net[Wd.abs().sum(axis=1) > 0])
+    b3 = pd.concat(books, axis=1).mean(axis=1, skipna=True)
+    return b3.dropna()
+
+
 def main():
     print(f"{'='*74}\n  PHASE 2D — PORTFOLIO LAYER  (declared: {VOL_LOOKBACK}d vol, "
           f"{TARGET_VOL:.0%} target, {LEV_CAP:.0f}x cap, {REBAL}bd rebal)\n{'='*74}",
@@ -151,53 +200,65 @@ def main():
     b1 = brick1_daily()
     print("Brick #2 (TS carry, frozen signal, inverse-vol weights)…", flush=True)
     b2_raw = brick2_daily_volweighted()
+    print("Brick #3 (FX carry, frozen books, daily-marked)…", flush=True)
+    b3 = brick3_daily()
 
     print(f"\n  RAW bricks:", flush=True)
-    s1_raw = stats(b1, "brick1 funding carry (as frozen)")
-    s2_raw = stats(b2_raw, "brick2 ts-carry (inverse-vol book)")
+    raw = {"b1": b1, "b2": b2_raw, "b3": b3}
+    s_raw = {k: stats(v, f"{k} raw") for k, v in raw.items()}
 
     print(f"\n  VOL-TARGETED to {TARGET_VOL:.0%}:", flush=True)
-    b1_vt = vol_target_stream(b1, "brick1")
-    b2_vt = vol_target_stream(b2_raw, "brick2")
-    s1 = stats(b1_vt, "brick1 vol-targeted")
-    s2 = stats(b2_vt, "brick2 vol-targeted")
+    vt = {k: vol_target_stream(v, k) for k, v in raw.items()}
+    s_vt = {k: stats(v, f"{k} vol-targeted") for k, v in vt.items()}
 
-    # ---- correlation & combination on the overlap
-    both = pd.DataFrame({"b1": b1_vt, "b2": b2_vt}).dropna()
-    if len(both) < 60:
-        print(f"\n  Overlap too short ({len(both)}d) — no combined book.", flush=True)
-        return
-    rho_d = both["b1"].corr(both["b2"])
-    wk = both.resample("W").sum()
-    rho_w = wk["b1"].corr(wk["b2"])
-    print(f"\n  Overlap: {both.index[0].date()} .. {both.index[-1].date()} "
-          f"({len(both)}d)  corr daily {rho_d:+.2f} / weekly {rho_w:+.2f}", flush=True)
+    # ---- pairwise correlations (each on its own maximal overlap)
+    V = pd.DataFrame(vt)
+    print(f"\n  Correlations (daily, pairwise maximal overlap):", flush=True)
+    print(V.corr(min_periods=120).round(2).to_string(), flush=True)
 
-    combo = 0.5 * both["b1"] + 0.5 * both["b2"]
-    print(f"\n  COMBINED (50/50 risk):", flush=True)
+    # ---- the firm's curve: equal risk across LIVE bricks each day
+    combo = V.mean(axis=1, skipna=True).dropna()
+    n_live = V.notna().sum(axis=1)
+    print(f"\n  COMBINED (equal risk across live bricks; composition timeline):",
+          flush=True)
+    for n in (1, 2, 3):
+        m = n_live == n
+        if m.any():
+            print(f"    {n} brick(s): {V.index[m][0].date()} .. {V.index[m][-1].date()}"
+                  f"  ({int(m.sum())}d)", flush=True)
     sc = stats(combo, "combined, un-retargeted")
     combo_vt = vol_target_stream(combo, "combined")
     scv = stats(combo_vt, f"combined, retargeted {TARGET_VOL:.0%}")
 
-    print(f"\n  Per-year (combined, retargeted):", flush=True)
+    # strict 3-way window for the record
+    all3 = V.dropna()
+    if len(all3) > 120:
+        c3 = all3.mean(axis=1)
+        print(f"\n  Strict 3-brick window:", flush=True)
+        s3 = stats(c3, f"all-3 window")
+    else:
+        s3 = None
+
+    print(f"\n  Per-year (combined, retargeted, last 12y):", flush=True)
     for y, v in combo_vt.groupby(combo_vt.index.year):
-        if len(v) < 60:
+        if len(v) < 60 or y < 2014:
             continue
         print(f"    {y}: net={(1 + v).prod() - 1:+7.1%}  "
-              f"Sharpe={v.mean() / v.std(ddof=1) * np.sqrt(ANN):+5.2f}", flush=True)
+              f"Sharpe={v.mean() / v.std(ddof=1) * np.sqrt(ANN):+5.2f}  "
+              f"bricks={int(n_live.reindex(v.index).max())}", flush=True)
 
     out_dir = RESULTS_DIR / "portfolio"
     out_dir.mkdir(parents=True, exist_ok=True)
-    for name, s in [("b1_vt", b1_vt), ("b2_vt", b2_vt), ("combined_vt", combo_vt)]:
+    for name, s in [("b1_vt", vt["b1"]), ("b2_vt", vt["b2"]), ("b3_vt", vt["b3"]),
+                    ("combined_vt", combo_vt)]:
         (1 + s).cumprod().to_csv(out_dir / f"phase2d_equity_{name}.csv",
                                  header=["equity"])
     with open(out_dir / "phase2d_summary.json", "w") as f:
         json.dump({"config": {"vol_lookback": VOL_LOOKBACK, "target_vol": TARGET_VOL,
-                              "lev_cap": LEV_CAP, "rebal": REBAL},
-                   "brick1_raw": s1_raw, "brick2_raw": s2_raw,
-                   "brick1_vt": s1, "brick2_vt": s2,
-                   "corr_daily": rho_d, "corr_weekly": rho_w,
-                   "combined": sc, "combined_vt": scv},
+                              "lev_cap": LEV_CAP, "rebal": REBAL, "n_bricks": 3},
+                   "raw": s_raw, "vol_targeted": s_vt,
+                   "corr": V.corr(min_periods=120).to_dict(),
+                   "combined": sc, "combined_vt": scv, "all3_window": s3},
                   f, indent=2, default=str)
     print(f"\nSaved to {out_dir}/phase2d_*.json/csv", flush=True)
 

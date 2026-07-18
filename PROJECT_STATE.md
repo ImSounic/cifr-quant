@@ -234,6 +234,21 @@ persistence logic as funding carry, different asset class → decorrelated).
   futures broker + micro contracts (MCL/MNG) — a Phase 4.5-style venue question
   for later, NOT a research blocker.
 
+**✅ PHASE 2D EXTENDED TO 3 BRICKS (July 19)** — brick #3 (FX carry) added with
+a DAILY-marked book (monthly frozen rebalance rules; daily spot + carry/252
+accrual; costs on monthly weight changes). The firm's continuous curve now runs
+**1982→today** with dynamic membership (1 brick →2 →3 →2 as data allows):
+- Correlations: all three pairs **−0.03..−0.06** — an orthogonal book.
+- **Combined, retargeted 10% vol: +8.8%/yr, Sharpe 0.84 over 44.3y**, maxDD
+  −28.7% (early sparse-brick era; the modern book is far tamer).
+- **Strict 3-brick window (2022-04..2024-04): Sharpe 1.08, maxDD −5.0%** —
+  the full stack reaches the plan's 1.0–1.5 target band. 3-brick years:
+  2022 +11.3% / 2023 +15.2% / 2024 +1.1%.
+- Config note: b3 raw vol is ~5%, so the declared 3x leverage cap binds on 26%
+  of days (costs some FX upside; recorded, not tuned away).
+- The live continuation of the 3-brick curve is data-gated on brick #2's
+  snapshot accumulator (EIA history ended Apr 2024).
+
 **✅ PHASE 2D BUILT (July 18) — the portfolio layer (`scripts/portfolio_2d.py`)**
 *In plain terms*: the two validated strategies are each individually scary
 (−30%/−60% drawdowns) but move independently of each other — so sized by risk
