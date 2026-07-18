@@ -234,6 +234,30 @@ persistence logic as funding carry, different asset class → decorrelated).
   futures broker + micro contracts (MCL/MNG) — a Phase 4.5-style venue question
   for later, NOT a research blocker.
 
+**✅ PHASE 2D BUILT (July 18) — the portfolio layer (`scripts/portfolio_2d.py`)**
+*In plain terms*: the two validated strategies are each individually scary
+(−30%/−60% drawdowns) but move independently of each other — so sized by risk
+and run together, the swings largely cancel while the returns add.
+- **Declared config (no sweeps)**: 63d trailing vol (the IC-0.61 persistence
+  rule), 10% vol target per brick and for the combo, 3x leverage cap, weekly,
+  50/50 risk across bricks. Signals untouched (frozen).
+- **Inverse-vol weights alone fix brick #2**: maxDD −59.8% → **−27.7%** at the
+  SAME Sharpe (0.44) — the natgas concentration was pure sizing, not signal.
+- **Measured brick correlation ≈ 0** (−0.03 daily / −0.09 weekly on the 2y
+  overlap) — the decorrelation thesis is now measured, not assumed.
+- **Combined book (overlap 2022-04..2024-04, retargeted 10% vol): +7.0%/yr,
+  Sharpe 0.69, maxDD −8.8%**, positive all 3 years — matches the diversification
+  arithmetic ((0.37+0.46)/√2 ≈ 0.59) and beats either brick standalone.
+- **Honest caveats**: the overlap is only 2.0y (Sharpe se ~0.7 — the robust
+  deliverables are the ρ≈0 measurement and the drawdown mechanics, not the
+  0.69 point estimate); the combined curve ends April 2024 (brick #2 history
+  ends there — the snapshot accumulator is building the live series); crypto
+  weekend PnL is folded into the next business day to share a 252d grid.
+- **What this means**: the firm's portfolio, at realistic small-account vol
+  (10%), currently promises ~+5-7%/yr with single-digit drawdowns — and every
+  additional uncorrelated brick raises the Sharpe by ~sqrt(N) arithmetic.
+  Brick #3 candidates: OI/squeeze (~mid-Aug), Phase 3 text features.
+
 **❌ COT positioning (June 10)** — commodities' cheap candidate, killed on 40 years
 of data: spec-crowding percentile mean IC ≈ 0, sign coinflip across 6 commodities,
 the one tempting cell (4w XS t=−2.30) fails multiplicity AND its construction-
