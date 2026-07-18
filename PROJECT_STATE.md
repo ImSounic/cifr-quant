@@ -68,6 +68,11 @@ execution-lab account-setup failure. The fill-rate measurements remain valid.
 *Fix path*: convert the demo BTC/ETH/OKB to USDT (or enable multi-currency margin),
 flatten the stray book, restart the loop. Zombie-order hypothesis tested and
 rejected (0 open orders, ordFrozen=0; `okx_demo_diag.py` is the tool).
+**FIXED July 18 evening**: account converted to $75.4k USDT, flattened, upgraded
+to Multi-currency margin (level 3), net mode; diag `--probe` confirms orders
+place at minimal size. Demo book restarts clean at the first cycle on/after
+**July 19** — fill-rate measurements from that date onward are the trustworthy
+series (earlier stats were taken while the book was margin-starved).
 
 **Ops repairs shipped (July 18, laptop → git → HPC)**: `paper_review.py` and
 `heartbeat_carry.py` fixed for the mixed 11/13-column history CSV (schema grew
