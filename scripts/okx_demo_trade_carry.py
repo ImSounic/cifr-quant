@@ -164,7 +164,7 @@ def place_rebalance(ex, targets_w, equity, positions):
                 print(f"  ORDER FAILED {sym}: account is in HEDGE mode — switch demo "
                       f"account to One-way position mode (see docstring).", flush=True)
             else:
-                print(f"  order failed {sym}: {msg[:140]}", flush=True)
+                print(f"  order failed {sym}: {msg[:400]}", flush=True)
         time.sleep(ex.rateLimit / 1000)
     return orders, rejects, granularity_skips
 

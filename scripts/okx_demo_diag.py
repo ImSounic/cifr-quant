@@ -39,10 +39,27 @@ def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--cancel-zombies", action="store_true",
                     help="Cancel open orders older than 9h (state-changing)")
+    ap.add_argument("--probe", action="store_true",
+                    help="Place ONE minimal post-only buy 50%% below bid (cannot fill) "
+                         "to capture OKX's full margin-error message, then cancel it")
     args = ap.parse_args()
 
     ex = get_exchange()
     now_ms = ex.milliseconds()
+
+    # 0. Account configuration — margin mode is the first suspect for 51008
+    try:
+        cfg = ex.private_get_account_config()["data"][0]
+        lv = {"1": "1 = Spot mode (DERIVATIVES DISABLED — orders will fail; "
+                   "upgrade account mode in demo settings)",
+              "2": "2 = Spot & futures (single-currency margin)",
+              "3": "3 = Multi-currency margin",
+              "4": "4 = Portfolio margin"}.get(str(cfg.get("acctLv")), str(cfg.get("acctLv")))
+        print(f"\n  Account level: {lv}", flush=True)
+        print(f"  Position mode: {cfg.get('posMode')} (executor needs net_mode/one-way)",
+              flush=True)
+    except Exception as e:
+        print(f"  (account config unavailable: {e})", flush=True)
 
     # 1. Balance: equity vs what's actually available vs frozen by orders
     bal = ex.fetch_balance()
@@ -133,6 +150,27 @@ def main():
     elif zombies:
         print(f"\n  Re-run with --cancel-zombies to cancel them and free the margin.",
               flush=True)
+
+    # Probe: minimal unfillable order to hear OKX's FULL complaint verbatim
+    if args.probe:
+        m = "BTC/USDT:USDT"
+        print(f"\n{'='*64}\n  PROBE ORDER ({m})\n{'='*64}", flush=True)
+        try:
+            ob = ex.fetch_order_book(m, limit=5)
+            bid = ob["bids"][0][0]
+            px = float(ex.price_to_precision(m, bid * 0.5))
+            min_amt = (ex.market(m).get("limits", {}).get("amount", {}).get("min")) or 1
+            amt = float(ex.amount_to_precision(m, min_amt))
+            print(f"  attempting: buy {amt} contracts @ {px} (bid {bid}; unfillable, "
+                  f"post-only, cross)", flush=True)
+            od = ex.create_order(m, "limit", "buy", amt, px,
+                                 params={"postOnly": True, "tdMode": "cross"})
+            print(f"  PLACED OK (id={od['id']}) — margin works at minimal size; "
+                  f"the failures are SIZE-related. Cancelling…", flush=True)
+            ex.cancel_order(od["id"], m)
+            print(f"  cancelled.", flush=True)
+        except Exception as e:
+            print(f"  FULL ERROR:\n  {e}", flush=True)
 
 
 if __name__ == "__main__":
