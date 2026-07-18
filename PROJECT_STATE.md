@@ -277,6 +277,33 @@ VIX index fetcher — all in the respective `*_skill.py` scripts.
 FX-carry retest (when declared), multi-sector TS carry (snapshots ripening),
 Phase 3 text features.
 
+**✅ BRICK #3: G10+EM FX CARRY (July 18) — retest PASSED, backtest survives,
+FROZEN as `fxcarry_backtest_v1`.**
+*In plain terms*: currencies of countries that pay high interest beat those
+that pay low interest — the borrower demanding cheap-currency funding is the
+willing payer. Tested three separate ways on non-overlapping data.
+- **Evidence chain (all pre-declared)**: original G10 XS t=+2.66, 9/9 positive
+  5y buckets 1982–2026 (batch-2 near-miss); independent retest PRIMARY EM panel
+  (MXN ZAR KRW CNY DKK; BRL/INR excluded by data availability from the fixed
+  list) **t=+4.03, 6/6 buckets, 1997–2026**; SECONDARY early-G10 1974–82
+  t=+2.05 positive. Passed the declared rule (primary ≥2.5 + buckets + secondary
+  sign).
+- **Earned backtest** (gross 1.0, monthly; costs 5bp G10 / 20bp EM per side;
+  x2 scenario ~unchanged — turnover is 0.08–0.17/mo, carry is slow):
+  G10 book +1.4%/yr Sharpe 0.30 (44y); **EM book +4.9%/yr Sharpe 0.72 (29y,
+  21/29 positive years)**; 50/50 combined **Sharpe 0.66, maxDD −18.7%** at ~4%
+  unlevered vol (≈ +6.5%/yr at the portfolio's 10% vol target).
+- **Correlation to existing bricks ≈ ZERO**: fx-vs-funding −0.04 (54mo),
+  fx-vs-tscarry **−0.03 on 471 months**. Three mutually uncorrelated bricks →
+  implied equal-risk portfolio Sharpe (0.43+0.46+0.66)/√3 ≈ **0.9**.
+- **Caveats**: EM carry has peso-crash tails (worst month −16.9%, skew −0.4 —
+  moderate at monthly granularity but real); spot+rate is an idealization of a
+  rolled-forward book (cost knob absorbs friction, x2 scenario held); data
+  alive through 2026 (no recency gap — unlike brick #2).
+- **Next**: extend `portfolio_2d.py` to 3 bricks (needs a daily-marked FX book);
+  execution venue for FX at small scale (spot broker micro-lots — IBKR-type)
+  is a Phase 4.5 question, not a research blocker.
+
 **❌ COT positioning (June 10)** — commodities' cheap candidate, killed on 40 years
 of data: spec-crowding percentile mean IC ≈ 0, sign coinflip across 6 commodities,
 the one tempting cell (4w XS t=−2.30) fails multiplicity AND its construction-
