@@ -258,6 +258,25 @@ and run together, the swings largely cancel while the returns add.
   additional uncorrelated brick raises the Sharpe by ~sqrt(N) arithmetic.
   Brick #3 candidates: OI/squeeze (~mid-Aug), Phase 3 text features.
 
+**BATCH-2 GAUNTLET (July 18) — 6 candidates, 13 declared cells, family gate
+|t| > ~2.9 (Bonferroni) + stability. RESULT: 0/6 passed — one strong near-miss.**
+*In plain terms*: we widened the funnel to five new asset classes in one
+sitting. The statistics killed everything, which is the factory working —
+each test cost minutes, and two candidates left leads worth keeping.
+| Candidate | Best cell | Verdict |
+|---|---|---|
+| Energy TSMOM (12m) | t=+1.73, 12/13 buckets | ❌ suggestive but breadth-limited (literature needs 50+ markets; we have 6) |
+| Curve shape (slope-mom, fly) | t=+2.44 | ❌ dead |
+| Winter seasonality NG+HO | t=−1.85 (WRONG SIGN — winter longs PAY) | ❌ dead; hypothesis inverted in data, and post-hoc sign flips are forbidden |
+| **G10 FX carry** | **XS t=+2.66, 9/9 positive 5y buckets (44y!)** ; TS t=+2.89 | ❌ NEAR-MISS — best stability record ever seen here; earns ONE pre-declared independent retest (broader ccy universe / EM panel) as a NEW trial. Data alive through 2026 (FRED/OECD). |
+| Bond term-spread carry | t=+2.18, 9/9 buckets | ❌ stable but underpowered; 1980s bond bull does much of the work |
+| VIX carry (short vol in contango) | t=+0.91; worst 5d **−123%**, skew −5.1 | ❌ dead — the tail test correctly priced Volmageddon; premium ≈ ruin compensation |
+New reusable infra: FRED keyless fetcher (FX spots/rates, CMT yields), CBOE
+VIX index fetcher — all in the respective `*_skill.py` scripts.
+**Portfolio remains 2 bricks.** Next brick chances: OI/squeeze (~mid-Aug),
+FX-carry retest (when declared), multi-sector TS carry (snapshots ripening),
+Phase 3 text features.
+
 **❌ COT positioning (June 10)** — commodities' cheap candidate, killed on 40 years
 of data: spec-crowding percentile mean IC ≈ 0, sign coinflip across 6 commodities,
 the one tempting cell (4w XS t=−2.30) fails multiplicity AND its construction-
