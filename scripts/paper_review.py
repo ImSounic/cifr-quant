@@ -37,6 +37,38 @@ from configs.base_config import RESULTS_DIR
 
 PAPER_DIR = RESULTS_DIR / "paper"
 
+# carry_history.csv schema grew mid-run: the header was written with 11 columns,
+# then the synthetic-fill columns were inserted before longs/shorts, so the file
+# mixes 11- and 13-field rows under an 11-column header. Map each row by its
+# field count instead of trusting the header (naive NaN-padding would misalign
+# longs/shorts on the early rows).
+CARRY_COLS_V1 = ["run_at", "event", "n_assets", "price_pnl", "funding_pnl",
+                 "cost", "net", "equity", "turnover", "longs", "shorts"]
+CARRY_COLS_V2 = CARRY_COLS_V1[:9] + ["synth_orders", "synth_filled"] + CARRY_COLS_V1[9:]
+CARRY_NUM_COLS = ["n_assets", "price_pnl", "funding_pnl", "cost", "net",
+                  "equity", "turnover", "synth_orders", "synth_filled"]
+
+
+def load_carry_history(path):
+    recs = []
+    for line in path.read_text().splitlines():
+        f = line.split(",")
+        if not line.strip() or f[0] == "run_at":
+            continue
+        if len(f) == len(CARRY_COLS_V1):
+            cols = CARRY_COLS_V1
+        elif len(f) == len(CARRY_COLS_V2):
+            cols = CARRY_COLS_V2
+        else:
+            print(f"  (skipping malformed history line: {line[:60]}...)", flush=True)
+            continue
+        recs.append(dict(zip(cols, f)))
+    h = pd.DataFrame(recs)
+    for c in CARRY_NUM_COLS:
+        if c in h.columns:
+            h[c] = pd.to_numeric(h[c], errors="coerce")
+    return h
+
 # ---- Backtest expectations (frozen v2_maker_8h, results/backtest/carry_backtest_v2_maker_8h.json)
 BT_NET_MEAN = 0.477 / 4938          # ~+0.0079%/event  (total +47.7% over 4938 events)
 BT_NET_STD = 0.0050                 # per-event std implied by Sharpe 0.52
@@ -77,7 +109,7 @@ def main():
     if not hist_path.exists():
         print("No shadow history yet — nothing to review.")
         return
-    h = pd.read_csv(hist_path)
+    h = load_carry_history(hist_path)
     h["event"] = pd.to_datetime(h["event"])
     h = h.sort_values("event").reset_index(drop=True)
     n = len(h)
