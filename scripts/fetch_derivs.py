@@ -65,10 +65,12 @@ def main():
                 exchange_id=args.exchange),
                 out_dir / f"{safe}_funding.csv", True))
         if args.what in ("all", "perp"):
+            # Perp also re-runs: the fetch is incremental (appends candles after
+            # the file's last timestamp) — a re-run tops history up to now.
             jobs.append(("perp_1h", lambda: fetch_perp_ohlcv(
                 sym, timeframe="1h", start_date=args.start,
                 output_path=out_dir / f"{safe}_perp_1h.csv", exchange_id=args.exchange),
-                out_dir / f"{safe}_perp_1h.csv", False))
+                out_dir / f"{safe}_perp_1h.csv", True))
         if args.what in ("all", "oi"):
             # OI always refetches (appends new history; Binance only keeps 30d)
             jobs.append(("oi_1h", lambda: fetch_oi_history(

@@ -87,11 +87,21 @@ def fetch_perp_ohlcv(
     output_path: Path | None = None,
     exchange_id: str = "binanceusdm",
 ) -> pd.DataFrame:
-    """Perp klines (same schema as spot fetcher: timestamps OHLCV + amount)."""
+    """Perp klines (same schema as spot fetcher: timestamps OHLCV + amount).
+    INCREMENTAL like the funding fetch: if the output file exists, fetch only
+    candles after its last timestamp and append (dedup) — a re-run tops the
+    file up to now instead of being skipped."""
     ex = _exchange(exchange_id)
     symbol = _perp_symbol(spot_symbol, exchange_id)
     since = ex.parse8601(f"{start_date}T00:00:00Z")
     now = ex.milliseconds()
+
+    existing = None
+    if output_path is not None and output_path.exists():
+        existing = pd.read_csv(output_path)
+        existing["timestamps"] = pd.to_datetime(existing["timestamps"])
+        if not existing.empty:
+            since = max(since, int(existing["timestamps"].max().timestamp() * 1000) + 1)
 
     candles = []
     with tqdm(desc=f"perp {timeframe} {spot_symbol}") as pbar:
@@ -109,6 +119,9 @@ def fetch_perp_ohlcv(
         df["timestamps"] = pd.to_datetime(df["timestamp_ms"], unit="ms")
         df["amount"] = df["close"] * df["volume"]
         df = df[["timestamps", "open", "high", "low", "close", "volume", "amount"]]
+    if existing is not None and not existing.empty:
+        df = pd.concat([existing, df], ignore_index=True)
+    if not df.empty:
         df = df.drop_duplicates(subset="timestamps").sort_values("timestamps").reset_index(drop=True)
     if output_path and not df.empty:
         output_path.parent.mkdir(parents=True, exist_ok=True)
