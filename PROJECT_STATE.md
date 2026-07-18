@@ -216,9 +216,23 @@ persistence logic as funding carry, different asset class → decorrelated).
   energy-only (the literature's stronger multi-sector XS version is data-gated
   on paid curves); small-account tradability needs micro contracts (MCL/MNG)
   and a real futures broker — a Phase-4 question, not a diagnostic one.
-- **Next per constitution**: cost-honest backtest of the frozen construction;
-  then the portfolio conversation (funding carry + TS carry = 2 bricks →
-  Phase 2D vol-targeted combination becomes buildable).
+- **EARNED BACKTEST (July 18, config v1, counted: 1 config + 1 cost scenario)**:
+  1985–2024, weekly rebalance, roll costs included. **+8.8%/yr net, Sharpe 0.44,
+  23/39 positive years; cost drag only 1.2%/yr** (sign flips are rare — the −91%
+  naive-crypto-carry disaster does NOT repeat). Pessimistic 6bp scenario: +7.6%,
+  Sharpe 0.40 — cost-insensitive. Internally consistent with the diagnostic
+  (t=3.35 ≈ 0.44×√39y). **BUT maxDD −59.8%**: equal-notional lets natgas vol
+  dominate — standalone this is UNTRADEABLE at full size. This is a portfolio-
+  construction problem, not a signal problem, and it is exactly what Phase 2D
+  vol-targeting exists for (declared in the plan since June 10 — the risk layer,
+  not tuning). **BRICK #2 FROZEN as v1_3bp** (results/backtest/
+  tscarry_backtest_v1_3bp.json); any signal change re-earns the gate.
+- **Next per constitution**: **Phase 2D is now unblocked** — two decorrelated
+  frozen bricks (crypto funding carry Sharpe 0.52, energy TS carry Sharpe 0.44,
+  expected ρ≈0) combined under vol-targeted sizing (vol persistence IC 0.61 is
+  the one thing v1 proved predictable). Live trading of brick #2 needs a real
+  futures broker + micro contracts (MCL/MNG) — a Phase 4.5-style venue question
+  for later, NOT a research blocker.
 
 **❌ COT positioning (June 10)** — commodities' cheap candidate, killed on 40 years
 of data: spec-crowding percentile mean IC ≈ 0, sign coinflip across 6 commodities,
