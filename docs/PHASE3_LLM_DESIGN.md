@@ -60,3 +60,19 @@ manufacture look-ahead).
 
 Haiku-class, ~20 headlines/request, ~30-50k headlines ≈ $5-15. One scoring
 pass only; re-scoring with a different prompt = new trial, counted.
+
+## Amendments (July 19, before scoring — recorded, not silent)
+
+1. **Scorer = open-weights local model (Qwen2.5-7B-Instruct, Q4, via ollama on
+   the RTX PRO 1000), not Claude.** Raj's call (no paid models). Side effect:
+   a 7B model has memorized far LESS crypto history than a frontier model —
+   the hindsight-contamination risk shrinks. Cost: $0. Temperature 0, one pass.
+2. **Corpus selection executed per the declared criteria**:
+   - INCLUDED: CoinTelegraph newsfeed (16,825 headlines, 2017-08..2020-04,
+     clean published timestamps) + oliviervha Crypto News+ (31,037, 2021-10..
+     2023-12). Total 47,862 headlines in the priced window.
+   - EXCLUDED: kashnitsky 2013-18 (year-granularity only; URL date recovery
+     22% — fails the timestamp criterion).
+   - Known coverage hole 2020-04..2021-10, declared as-is.
+   - oliviervha ships a 'sentiment' column — IGNORED (pre-scored sentiment is
+     exactly the thing this design distrusts).
