@@ -319,6 +319,24 @@ willing payer. Tested three separate ways on non-overlapping data.
   execution venue for FX at small scale (spot broker micro-lots — IBKR-type)
   is a Phase 4.5 question, not a research blocker.
 
+**PHASE 3.1 (July 19) — first text-adjacent candidates: 0/5 + 0/3 retest, KILLED.**
+- Declared batch (5 cells, |t|>2.6): Wikipedia ATTENTION-shock contrarian (XS 1d/5d,
+  TS-BTC 5d) + Fear&Greed CONTRARIAN (5d/21d) on 2022-26 perp data. All failed —
+  and both hypotheses came out INVERTED with internal consistency (attention
+  spikes CONTINUE, t=−2.00 on the contrarian construction; fear precedes losses).
+- Pre-declared retest of the inverted forms on INDEPENDENT pre-2022 spot data
+  (Binance spot 2017-21, never previously used; 3 cells, |t|>2.5, signs fixed):
+  continuation 1d t=+1.38 (right sign, weak), 5d t=−0.23 (wrong sign), FNG
+  momentum t=+1.36. FAIL → killed, not parked. Lifetime ledger: 25 candidates,
+  3 bricks.
+- **GDELT news-tone is DATA-GATED from the dev IP** (rate-limiter cooldown even
+  at 6-month queries) — retry from the HPC IP; if it serves, per-coin daily
+  news tone 2017- is the next Phase-3 candidate. After that: LLM-scored
+  headlines (Claude reading event text → features) — the genuinely-LLM leg.
+- Infra kept: `attention_skill.py` / `attention_retest.py` fetchers (Wikipedia
+  pageviews, Fear&Greed, Binance spot daily 2017-21 panel — the spot panel is
+  new reusable history for any future crypto diagnostic).
+
 **❌ COT positioning (June 10)** — commodities' cheap candidate, killed on 40 years
 of data: spec-crowding percentile mean IC ≈ 0, sign coinflip across 6 commodities,
 the one tempting cell (4w XS t=−2.30) fails multiplicity AND its construction-
