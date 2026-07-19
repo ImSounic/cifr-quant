@@ -319,6 +319,17 @@ willing payer. Tested three separate ways on non-overlapping data.
   execution venue for FX at small scale (spot broker micro-lots — IBKR-type)
   is a Phase 4.5 question, not a research blocker.
 
+**PHASE 3.2 (July 19) — FOMC event window: KILLED.** 68 announcements 2017-26
+(dates parsed from federalreserve.gov, cached + fetcher committed). Crypto
+event-window +0.26%/d but t=+0.84 (n=126 — underpowered by construction against
+crypto vol); energy t=−0.45. No inversion, no near-miss. *Also closes the
+question cheaply*: macro-calendar timing is not where crypto/energy edge lives
+at daily granularity. GDELT DOC API confirmed dead from BOTH IPs (globally
+throttled) — Phase 3's remaining path is an LLM-scored HEADLINE CORPUS
+(candidate sources needing an account/download decision: Kaggle historical
+crypto-news datasets; pushshift Reddit dumps via Academic Torrents; GDELT bulk
+via BigQuery free tier). No corpus, no Phase 3 — the decision is Raj's.
+
 **PHASE 3.1 (July 19) — first text-adjacent candidates: 0/5 + 0/3 retest, KILLED.**
 - Declared batch (5 cells, |t|>2.6): Wikipedia ATTENTION-shock contrarian (XS 1d/5d,
   TS-BTC 5d) + Fear&Greed CONTRARIAN (5d/21d) on 2022-26 perp data. All failed —
