@@ -15,6 +15,7 @@ Usage:
 """
 
 import json
+import os
 import re
 import sys
 import argparse
@@ -30,7 +31,7 @@ from configs.base_config import DATA_RAW_DIR
 
 NEWS_DIR = DATA_RAW_DIR / "news"
 OUT_PATH = NEWS_DIR / "scored_headlines.csv"
-OLLAMA_URL = "http://localhost:11434/api/chat"
+OLLAMA_URL = os.environ.get("OLLAMA_URL", "http://localhost:11434/api/chat")
 MODEL = "qwen2.5:7b"
 BATCH = 20
 
