@@ -74,7 +74,10 @@ def ask(batch_titles):
     with urllib.request.urlopen(req, timeout=600) as r:
         out = json.loads(r.read())["message"]["content"]
     m = re.search(r"\[.*\]", out, re.S)
-    return json.loads(m.group(0)) if m else []
+    if not m:
+        return []
+    # Qwen writes "dir": +1 — a leading '+' is invalid JSON
+    return json.loads(re.sub(r":\s*\+", ": ", m.group(0)))
 
 
 def main():
